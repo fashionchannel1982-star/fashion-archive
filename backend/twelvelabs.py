@@ -327,41 +327,140 @@ async def semantic_search(
 
 async def generate_look_descriptions(video_id: str) -> list:
     """
-    Use Pegasus to generate structured descriptions of each look in a show.
-    Returns a list of timestamped look objects.
+    Extract timestamped looks from a show using two-step approach:
+      1. Use Marengo search to find distinct look moments with timestamps
+      2. Run Pegasus /generate on each clip for a precise fashion description
 
-    Pegasus understands fashion context — it can identify garments,
-    colours, silhouettes, and styling details from video.
+    Returns a list of look objects with timestamp_start, timestamp_end,
+    description, and look_number — ready to write to the moments table.
+    """
+    # Step 1: Get timestamped clips via Marengo search
+    # Broad queries to capture the full range of looks
+    look_queries = [
+        "model walking on runway wearing outfit",
+        "fashion look runway walk",
+        "designer clothing on catwalk",
+    ]
+
+    seen_timestamps = set()
+    raw_clips = []
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for query in look_queries:
+            response = await client.post(
+                f"{TWELVE_LABS_BASE_URL}/search",
+                headers=get_headers(),
+                json={
+                    "index_id": INDEX_ID,
+                    "query": query,
+                    "search_options": ["visual"],
+                    "filter": {"id": [video_id]},
+                    "page_limit": 50,
+                    "threshold": "low",
+                },
+            )
+            if response.status_code != 200:
+                continue
+            for clip in response.json().get("data", []):
+                # Deduplicate by rounding start time to nearest 3 seconds
+                bucket = round(clip["start"] / 3) * 3
+                if bucket not in seen_timestamps:
+                    seen_timestamps.add(bucket)
+                    raw_clips.append(clip)
+
+    # Sort by start time
+    raw_clips.sort(key=lambda c: c["start"])
+    logger.info(f"Found {len(raw_clips)} distinct clips for video {video_id}")
+
+    if not raw_clips:
+        # Fallback: use full-video Pegasus if no clips found
+        logger.warning(f"No clips found for {video_id}, falling back to full-video generation")
+        return await _generate_looks_fallback(video_id)
+
+    # Step 2: Run Pegasus on each clip for a precise description
+    looks = []
+    look_number = 1
+    clip_prompt = (
+        "Describe this runway look precisely for fashion research. "
+        "Include: garment types, silhouette, colours, fabrics if identifiable, "
+        "key styling details. Do not describe the model. Under 40 words. "
+        "Use fashion vocabulary: e.g. 'structured ivory wool blazer with exaggerated shoulders "
+        "over wide-leg trousers, gold hardware belt'."
+    )
+
+    for clip in raw_clips:
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                response = await client.post(
+                    f"{TWELVE_LABS_BASE_URL}/generate",
+                    headers=get_headers(),
+                    json={
+                        "video_id": video_id,
+                        "prompt": clip_prompt,
+                        "temperature": 0.2,
+                        "start": clip["start"],
+                        "end": clip["end"],
+                    },
+                )
+
+            if response.status_code == 200:
+                description = response.json().get("data", "").strip()
+            else:
+                description = ""
+
+            looks.append({
+                "video_id": video_id,
+                "look_number": look_number,
+                "description": description or f"Look {look_number}",
+                "timestamp_start": clip["start"],
+                "timestamp_end": clip["end"],
+                "thumbnail_url": clip.get("thumbnail_url"),
+                "score": clip.get("score", 0),
+                "garments": [],
+                "colours": [],
+                "silhouette": None,
+                "key_pieces": [],
+            })
+            look_number += 1
+
+            # Respect Twelve Labs rate limits
+            await asyncio.sleep(0.5)
+
+        except Exception as e:
+            logger.warning(f"Failed to describe clip at {clip['start']}s: {e}")
+            continue
+
+    logger.info(f"Generated {len(looks)} look descriptions for video {video_id}")
+    return looks
+
+
+async def _generate_looks_fallback(video_id: str) -> list:
+    """
+    Fallback: full-video Pegasus generation when clip search returns nothing.
+    Used for older or non-standard footage that Marengo struggles to segment.
     """
     prompt = """
     Analyse this fashion show video. For each distinct look (outfit change or model appearance):
-
     1. Identify the look number in sequence
-    2. Describe the complete outfit in detail: garments, fabrics, construction
-    3. List all colours present
-    4. Describe the silhouette and proportion
-    5. Note any standout or signature pieces
-    6. Identify accessories, shoes, hair and makeup direction if visible
+    2. Describe the complete outfit: garments, fabrics, colours, silhouette
+    3. Note standout or signature pieces
 
-    Return structured data for each look. Be specific and precise —
-    this data will be used for professional fashion research.
+    Format each look as: Look N: [description]
+    Be specific and precise — this is for professional fashion research.
     """
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
             f"{TWELVE_LABS_BASE_URL}/generate",
             headers=get_headers(),
             json={
                 "video_id": video_id,
                 "prompt": prompt,
-                "temperature": 0.2,  # Low temperature for factual accuracy
+                "temperature": 0.2,
             },
         )
         response.raise_for_status()
-        data = response.json()
+        raw_text = response.json().get("data", "")
 
-    # Parse the generated text into structured looks
-    raw_text = data.get("data", "")
     return _parse_look_descriptions(raw_text, video_id)
 
 
