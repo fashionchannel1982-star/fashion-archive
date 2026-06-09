@@ -1,0 +1,20 @@
+# env files - never commit these
+.env
+backend/.env
+frontend/.env.local
+
+# dependencies
+node_modules/
+frontend/node_modules/
+backend/venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# next.js
+frontend/.next/
+frontend/out/
+
+# misc
+.DS_Store
+*.log
