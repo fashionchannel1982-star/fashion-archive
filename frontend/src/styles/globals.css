@@ -1,0 +1,18 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant:wght@300;400;500&family=Space+Grotesk:wght@300;400;500&display=swap');
+
+:root {
+  --bg-primary: #0A0A0A;
+  --bg-card: #141414;
+  --text-primary: #F5F5F0;
+  --text-secondary: #8A8A85;
+  --accent: #EDE8DC;
+  --font-display: 'Cormorant', serif;
+  --font-body: 'Space Grotesk', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: #0A0A0A; color: #F5F5F0; }
+input:focus { outline: none; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2A2A2A; border-radius: 2px; }

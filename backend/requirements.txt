@@ -7,3 +7,4 @@ anthropic==0.28.0
 python-dotenv==1.0.1
 pydantic==2.7.1
 tenacity==8.3.0
+twelvelabs>=1.2.7
