@@ -885,6 +885,22 @@ export default function Home() {
               >
                 FASHION ARCHIVE
               </h1>
+              <a
+                href="/timeline"
+                style={{
+                  fontSize: 11,
+                  letterSpacing: "0.18em",
+                  color: "#8A8A85",
+                  textDecoration: "none",
+                  borderBottom: "1px solid #2A2A2A",
+                  paddingBottom: 2,
+                  transition: "color 0.2s, border-color 0.2s",
+                }}
+                onMouseEnter={(e) => { (e.target as HTMLElement).style.color = "#C8A97A"; (e.target as HTMLElement).style.borderBottomColor = "#C8A97A"; }}
+                onMouseLeave={(e) => { (e.target as HTMLElement).style.color = "#8A8A85"; (e.target as HTMLElement).style.borderBottomColor = "#2A2A2A"; }}
+              >
+                CHANEL A/W TIMELINE →
+              </a>
             </div>
           )}
 

@@ -57,6 +57,13 @@ class Show(Base):
     looks_count: Mapped[int] = mapped_column(Integer, default=0)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     raw_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Velocity / timeline fields
+    season_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)       # 'AW-RTW', 'SS-RTW', 'Couture'
+    show_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    creative_director: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(String, nullable=True)            # 'youtube_mvp' or 'fc_master'
+    source_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_cd_transition: Mapped[Optional[bool]] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     moments: Mapped[list["Moment"]] = relationship("Moment", back_populates="show", cascade="all, delete-orphan")
@@ -74,6 +81,7 @@ class Moment(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     thumbnail_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     enriched_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    code_tags: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)   # Chanel house codes
     embedding: Mapped[Optional[list]] = mapped_column(Vector(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

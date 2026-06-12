@@ -226,6 +226,167 @@ async def export_moment(req: ExportRequest):
         )
 
 
+# ─────────────────────────────────────────
+# TIMELINE — TREND VELOCITY
+# ─────────────────────────────────────────
+
+CHANEL_CODES = ["tweed", "two_tone", "camellia", "pearls", "chains", "quilting"]
+
+
+@app.get("/api/timeline")
+async def get_timeline(house: str = "Chanel", season_type: str = "AW-RTW", code: str = None):
+    """
+    Returns the 10-point trend velocity timeline for a house + season type.
+
+    Query params:
+      house        — brand name (default: Chanel)
+      season_type  — AW-RTW, SS-RTW, Couture (default: AW-RTW)
+      code         — optional: filter moments to a specific house code
+                     (tweed, two_tone, camellia, pearls, chains, quilting)
+
+    Response includes:
+      - 10 timeline points ordered by year
+      - per-show code tag aggregates
+      - CD-transition markers
+      - if code specified: representative moment from each show + cross-year echo pair
+    """
+    from services.database import AsyncSessionLocal, Show, Moment
+    from services.twelvelabs import embed_text
+    from sqlalchemy import select, text as sql_text
+
+    async with AsyncSessionLocal() as session:
+        shows_rows = await session.execute(
+            select(Show)
+            .where(Show.brand == house)
+            .where(Show.season_type == season_type)
+            .where(Show.status == "ready")
+            .order_by(Show.year)
+        )
+        shows = shows_rows.scalars().all()
+
+    if not shows:
+        return {"house": house, "season_type": season_type, "points": [], "total": 0}
+
+    points = []
+    for show in shows:
+        async with AsyncSessionLocal() as session:
+            moments_rows = await session.execute(
+                select(Moment).where(Moment.show_id == show.id)
+            )
+            moments = moments_rows.scalars().all()
+
+        total = len(moments)
+        code_agg = {}
+        for c in CHANEL_CODES:
+            hits = sum(1 for m in moments if m.code_tags and m.code_tags.get(c))
+            code_agg[c] = {"count": hits, "pct": round(hits / total * 100) if total else 0}
+
+        # Representative moment for requested code
+        rep_moment = None
+        if code and code in CHANEL_CODES:
+            tagged = [m for m in moments if m.code_tags and m.code_tags.get(code)]
+            if tagged:
+                m = tagged[0]
+                rep_moment = {
+                    "moment_id": m.id,
+                    "timestamp_start": m.timestamp_start,
+                    "timestamp_end": m.timestamp_end,
+                    "description": m.description,
+                    "thumbnail_url": m.thumbnail_url,
+                }
+
+        points.append({
+            "show_id": show.id,
+            "season": show.season,
+            "year": show.year,
+            "show_date": show.show_date.isoformat() if show.show_date else None,
+            "creative_director": show.creative_director,
+            "is_cd_transition": bool(show.is_cd_transition),
+            "source": show.source,
+            "look_count": total,
+            "codes": code_agg,
+            "rep_moment": rep_moment,
+        })
+
+    # Cross-year echo: find two moments (from different shows) with highest embedding similarity
+    echo = None
+    if code and code in CHANEL_CODES:
+        try:
+            async with AsyncSessionLocal() as session:
+                # Gather all moments with this code tag and an embedding, ordered by show year
+                rows = await session.execute(sql_text(f"""
+                    SELECT m.id, m.show_id, m.timestamp_start, m.description, m.thumbnail_url,
+                           s.season, s.year
+                    FROM moments m
+                    JOIN shows s ON s.id = m.show_id
+                    WHERE s.brand = :house
+                      AND s.season_type = :stype
+                      AND m.embedding IS NOT NULL
+                      AND m.code_tags ->> :code = 'true'
+                    ORDER BY s.year, m.timestamp_start
+                """), {"house": house, "stype": season_type, "code": code})
+                tagged_moments = rows.fetchall()
+
+            # Find the pair from different shows with best cosine similarity
+            if len(tagged_moments) >= 2:
+                async with AsyncSessionLocal() as session:
+                    # Use embedding similarity: pick earliest show's first moment,
+                    # find closest from a different show
+                    anchor = tagged_moments[0]
+                    anchor_vec_row = await session.execute(sql_text(
+                        "SELECT embedding FROM moments WHERE id = :id"
+                    ), {"id": anchor.id})
+                    anchor_vec = anchor_vec_row.scalar()
+
+                    if anchor_vec:
+                        vec_str = anchor_vec  # already stored as pgvector string
+                        other_ids = [str(m.id) for m in tagged_moments if m.show_id != anchor.show_id]
+                        if other_ids:
+                            id_list = "', '".join(other_ids)
+                            echo_row = await session.execute(sql_text(f"""
+                                SELECT m.id, m.show_id, m.timestamp_start, m.description,
+                                       m.thumbnail_url, s.season, s.year,
+                                       1 - (m.embedding <=> '{vec_str}'::vector) AS similarity
+                                FROM moments m
+                                JOIN shows s ON s.id = m.show_id
+                                WHERE m.id IN ('{id_list}')
+                                ORDER BY m.embedding <=> '{vec_str}'::vector
+                                LIMIT 1
+                            """))
+                            best = echo_row.fetchone()
+                            if best:
+                                echo = {
+                                    "anchor": {
+                                        "moment_id": anchor.id,
+                                        "season": anchor.season,
+                                        "year": anchor.year,
+                                        "timestamp_start": anchor.timestamp_start,
+                                        "description": anchor.description,
+                                        "thumbnail_url": anchor.thumbnail_url,
+                                    },
+                                    "echo": {
+                                        "moment_id": best.id,
+                                        "season": best.season,
+                                        "year": best.year,
+                                        "timestamp_start": best.timestamp_start,
+                                        "description": best.description,
+                                        "thumbnail_url": best.thumbnail_url,
+                                        "similarity": round(float(best.similarity), 3),
+                                    },
+                                }
+        except Exception as e:
+            logger.warning(f"Cross-year echo failed: {e}")
+
+    return {
+        "house": house,
+        "season_type": season_type,
+        "total": len(points),
+        "codes_available": CHANEL_CODES,
+        "points": points,
+        "cross_year_echo": echo,
+    }
+
+
 @app.get("/api/moments/{moment_id}/play")
 async def get_play_url(moment_id: str):
     """Returns HLS stream URL + timestamp for video playback."""
