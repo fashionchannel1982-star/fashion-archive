@@ -117,22 +117,30 @@ async def search(req: SearchRequest):
     results = []
     async with AsyncSessionLocal() as session:
         for item in tl_results:
-            video_id = item.get("video_id")
             score = item.get("score", 0.0)
             confidence = round(score * 100)
 
-            if confidence < 60:
+            if confidence < 30:
                 continue
 
-            # Find matching moment in DB
-            stmt = (
-                select(Moment, Show)
-                .join(Show, Show.id == Moment.show_id)
-                .where(Show.video_id == video_id)
-                .where(Moment.timestamp_start <= item.get("start", 0) + 5)
-                .where(Moment.timestamp_end >= item.get("start", 0) - 5)
-                .limit(1)
-            )
+            # pgvector path returns _moment_id directly; TL path uses video_id + timestamp
+            moment_id = item.get("_moment_id")
+            if moment_id:
+                stmt = (
+                    select(Moment, Show)
+                    .join(Show, Show.id == Moment.show_id)
+                    .where(Moment.id == moment_id)
+                )
+            else:
+                video_id = item.get("video_id")
+                stmt = (
+                    select(Moment, Show)
+                    .join(Show, Show.id == Moment.show_id)
+                    .where(Show.video_id == video_id)
+                    .where(Moment.timestamp_start <= item.get("start", 0) + 5)
+                    .where(Moment.timestamp_end >= item.get("start", 0) - 5)
+                    .limit(1)
+                )
             row = (await session.execute(stmt)).first()
 
             if row:
@@ -216,3 +224,47 @@ async def export_moment(req: ExportRequest):
             content=export,
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+
+
+@app.get("/api/moments/{moment_id}/play")
+async def get_play_url(moment_id: str):
+    """Returns HLS stream URL + timestamp for video playback."""
+    from services.database import AsyncSessionLocal, Moment, Show
+    from sqlalchemy import select
+    import httpx
+
+    async with AsyncSessionLocal() as session:
+        stmt = (
+            select(Moment, Show)
+            .join(Show, Show.id == Moment.show_id)
+            .where(Moment.id == moment_id)
+        )
+        row = (await session.execute(stmt)).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Moment not found")
+        moment, show = row
+
+    if not show.video_id:
+        raise HTTPException(status_code=404, detail="No video ID for this show")
+
+    TL_KEY = os.getenv("TWELVE_LABS_API_KEY")
+    TL_INDEX = os.getenv("TWELVE_LABS_INDEX_ID")
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(
+            f"https://api.twelvelabs.io/v1.3/indexes/{TL_INDEX}/videos/{show.video_id}",
+            headers={"x-api-key": TL_KEY},
+        )
+        r.raise_for_status()
+        data = r.json()
+
+    hls_url = data.get("hls", {}).get("video_url")
+    if not hls_url:
+        raise HTTPException(status_code=404, detail="No HLS stream available")
+
+    return {
+        "hls_url": hls_url,
+        "timestamp_start": moment.timestamp_start,
+        "timestamp_end": moment.timestamp_end,
+        "brand": show.brand,
+        "season": show.season,
+    }

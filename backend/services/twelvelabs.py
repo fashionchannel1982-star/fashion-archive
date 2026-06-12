@@ -9,15 +9,16 @@ Models used:
 """
 
 import os
-import httpx
+import base64
 import asyncio
+import httpx
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 import logging
 
 logger = logging.getLogger(__name__)
 
-TWELVE_LABS_BASE_URL = "https://api.twelvelabs.io/v1.2"
+TWELVE_LABS_BASE_URL = "https://api.twelvelabs.io/v1.3"
 API_KEY = os.getenv("TWELVE_LABS_API_KEY")
 INDEX_ID = os.getenv("TWELVE_LABS_INDEX_ID")
 
@@ -134,11 +135,12 @@ async def ingest_local_file(file_path: str, metadata: dict) -> str:
     upload_headers = {"x-api-key": API_KEY}
 
     with open(file_path, "rb") as f:
+        upload_timeout = max(300.0, file_size / (1024 * 1024) * 3)  # ~3s per MB, min 5 min
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(
                 connect=30.0,
-                read=300.0,   # 5 min read timeout for large files
-                write=300.0,  # 5 min write timeout for large uploads
+                read=upload_timeout,
+                write=upload_timeout,
                 pool=30.0,
             )
         ) as client:
@@ -271,50 +273,166 @@ async def wait_for_ingestion(task_id: str, poll_interval: int = 10) -> dict:
 # ─────────────────────────────────────────
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+async def embed_text(text: str) -> Optional[list]:
+    """
+    Embed a text query using Marengo3.0 → 512-dim vector.
+    Returns a list of floats, or None on failure.
+    """
+    import uuid
+    boundary = uuid.uuid4().hex
+    body = (
+        f'--{boundary}\r\nContent-Disposition: form-data; name="model_name"\r\n\r\nmarengo3.0\r\n'
+        f'--{boundary}\r\nContent-Disposition: form-data; name="text"\r\n\r\n{text}\r\n'
+        f'--{boundary}--\r\n'
+    ).encode()
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.post(
+            f"{TWELVE_LABS_BASE_URL}/embed",
+            headers={"x-api-key": API_KEY, "Content-Type": f"multipart/form-data; boundary={boundary}"},
+            content=body,
+        )
+        if r.status_code != 200:
+            logger.warning(f"embed_text failed ({r.status_code}): {r.text[:200]}")
+            return None
+        segments = r.json().get("text_embedding", {}).get("segments", [])
+        return segments[0]["float"] if segments else None
+
+
+async def embed_image(image_bytes: bytes) -> Optional[list]:
+    """
+    Embed an image (JPEG bytes) using Marengo3.0 → 512-dim vector.
+    Returns a list of floats, or None on failure.
+    """
+    import uuid
+    boundary = uuid.uuid4().hex
+    body = (
+        f'--{boundary}\r\nContent-Disposition: form-data; name="model_name"\r\n\r\nmarengo3.0\r\n'.encode() +
+        f'--{boundary}\r\nContent-Disposition: form-data; name="image_file"; filename="frame.jpg"\r\nContent-Type: image/jpeg\r\n\r\n'.encode() +
+        image_bytes +
+        f'\r\n--{boundary}--\r\n'.encode()
+    )
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.post(
+            f"{TWELVE_LABS_BASE_URL}/embed",
+            headers={"x-api-key": API_KEY, "Content-Type": f"multipart/form-data; boundary={boundary}"},
+            content=body,
+        )
+        if r.status_code != 200:
+            logger.warning(f"embed_image failed ({r.status_code}): {r.text[:200]}")
+            return None
+        segments = r.json().get("image_embedding", {}).get("segments", [])
+        return segments[0]["float"] if segments else None
+
+
 async def semantic_search(
     query: str,
     limit: int = 20,
     filters: Optional[dict] = None,
 ) -> list:
     """
-    Run semantic search across the entire indexed archive.
-    Returns clips with relevance scores, timestamps, and thumbnails.
-
-    Supports natural language queries like:
-    - "red carpet gowns with dramatic trains"
-    - "minimalist white structured jackets 1990s"
-    - "oversized shoulders power dressing"
+    Semantic search. Uses pgvector cosine similarity when embeddings exist,
+    falls back to TL /search rank-based scoring otherwise.
     """
-    search_options = ["visual", "conversation"]
+    from services.database import AsyncSessionLocal, Moment, Show
+    from sqlalchemy import select, text as sql_text
 
-    payload = {
-        "index_id": INDEX_ID,
-        "query": query,
-        "search_options": search_options,
-        "page_limit": limit,
-        "threshold": "medium",
-    }
+    # Try pgvector path first
+    query_vec = await embed_text(query)
+    if query_vec:
+        try:
+            # Format floats to avoid scientific notation (pgvector can't parse 1e-05)
+            vec_str = "[" + ",".join(f"{v:.8f}" for v in query_vec) + "]"
+            # Interpolate directly — safe since vec_str is machine-generated floats only
+            async with AsyncSessionLocal() as session:
+                rows = await session.execute(
+                    sql_text(f"""
+                        SELECT m.id, m.show_id, m.timestamp_start, m.timestamp_end,
+                               m.description, m.thumbnail_url,
+                               m.embedding <=> '{vec_str}'::vector AS distance
+                        FROM moments m
+                        WHERE m.embedding IS NOT NULL
+                        ORDER BY m.embedding <=> '{vec_str}'::vector
+                        LIMIT {limit}
+                    """)
+                )
+                pgvec_results = rows.fetchall()
 
-    if filters:
-        payload["filter"] = filters
+            if pgvec_results:
+                # Normalize scores: top result → ~0.95, rest scale down linearly
+                n = len(pgvec_results)
+                show_ids = list({r.show_id for r in pgvec_results})
+                async with AsyncSessionLocal() as session:
+                    shows_rows = await session.execute(
+                        select(Show).where(Show.id.in_(show_ids))
+                    )
+                    shows_map = {s.id: s for s in shows_rows.scalars().all()}
+
+                results = []
+                for i, r in enumerate(pgvec_results):
+                    show = shows_map.get(r.show_id)
+                    # Rank-normalized score: position 0 → 0.95, last → 0.30
+                    score = 0.95 - (i / max(n - 1, 1)) * 0.65
+                    results.append({
+                        "video_id": show.video_id if show else None,
+                        "score": round(score, 4),
+                        "start": r.timestamp_start,
+                        "end": r.timestamp_end,
+                        "thumbnail_url": r.thumbnail_url,
+                        "metadata": {},
+                        "_moment_id": str(r.id),
+                        "_show_id": str(r.show_id),
+                    })
+                return results
+        except Exception as e:
+            logger.warning(f"pgvector search failed, falling back to TL: {e}")
+
+    # Fallback: TL /search
+    files = _multipart_fields(
+        index_id=INDEX_ID,
+        query_text=query,
+        search_options="visual",
+        page_limit=str(limit),
+        threshold="medium",
+    )
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
             f"{TWELVE_LABS_BASE_URL}/search",
-            headers=get_headers(),
-            json=payload,
+            headers={"x-api-key": API_KEY},
+            files=files,
         )
         response.raise_for_status()
         data = response.json()
 
+    clips = data.get("data", [])
+    total = len(clips)
+
+    # Pre-fetch thumbnails for all unique video_ids
+    video_ids = list({c["video_id"] for c in clips})
+    thumbnails: dict = {}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for vid in video_ids:
+            try:
+                r = await client.get(
+                    f"{TWELVE_LABS_BASE_URL}/indexes/{INDEX_ID}/videos/{vid}",
+                    headers={"x-api-key": API_KEY},
+                )
+                if r.status_code == 200:
+                    thumb_list = r.json().get("hls", {}).get("thumbnail_urls", [])
+                    thumbnails[vid] = thumb_list[0] if thumb_list else None
+            except Exception:
+                pass
+
     results = []
-    for clip in data.get("data", []):
+    for clip in clips:
+        rank = clip.get("rank", total)
+        score = max(0.0, 1.0 - (rank - 1) / max(total, 1))
         results.append({
             "video_id": clip["video_id"],
-            "score": clip["score"],
-            "start": clip["start"],
-            "end": clip["end"],
-            "thumbnail_url": clip.get("thumbnail_url"),
+            "score": score,
+            "start": clip.get("start", 0),
+            "end": clip.get("end", 0),
+            "thumbnail_url": thumbnails.get(clip["video_id"]),
             "metadata": clip.get("metadata", {}),
         })
 
@@ -325,171 +443,210 @@ async def semantic_search(
 # VIDEO ANALYSIS — LOOK EXTRACTION
 # ─────────────────────────────────────────
 
-async def generate_look_descriptions(video_id: str) -> list:
-    """
-    Extract timestamped looks from a show using two-step approach:
-      1. Use Marengo search to find distinct look moments with timestamps
-      2. Run Pegasus /generate on each clip for a precise fashion description
+def _multipart_fields(**kwargs) -> dict:
+    """Convert string kwargs to httpx multipart files format (no actual files)."""
+    return {k: (None, str(v)) for k, v in kwargs.items()}
 
-    Returns a list of look objects with timestamp_start, timestamp_end,
-    description, and look_number — ready to write to the moments table.
+
+async def _search_clips_for_video(video_id: str, query: str, page_limit: int = 50) -> list:
+    """Search within a specific video using v1.3 multipart/form-data API."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"{TWELVE_LABS_BASE_URL}/search",
+            headers={"x-api-key": API_KEY},
+            files=_multipart_fields(
+                index_id=INDEX_ID,
+                query_text=query,
+                search_options="visual",
+                page_limit=str(page_limit),
+                threshold="low",
+            ),
+        )
+        if response.status_code != 200:
+            logger.warning(f"Search failed ({response.status_code}): {response.text[:200]}")
+            return []
+        return response.json().get("data", [])
+
+
+async def get_hls_url(video_id: str) -> Optional[str]:
+    """Fetch the HLS stream URL for a TL video."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(
+            f"{TWELVE_LABS_BASE_URL}/indexes/{INDEX_ID}/videos/{video_id}",
+            headers={"x-api-key": API_KEY},
+        )
+        if r.status_code != 200:
+            return None
+        thumbs = r.json().get("hls", {}).get("thumbnail_urls", [])
+        url = r.json().get("hls", {}).get("video_url")
+        return url
+
+
+async def extract_frame(hls_url: str, timestamp: float) -> Optional[bytes]:
+    """Extract a JPEG frame at timestamp from an HLS stream via ffmpeg."""
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-ss", str(timestamp), "-i", hls_url,
+        "-vframes", "1", "-f", "image2", "-vcodec", "mjpeg", "pipe:1",
+        "-loglevel", "quiet",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        return stdout if stdout else None
+    except asyncio.TimeoutError:
+        proc.kill()
+        return None
+
+
+async def describe_frame_with_claude(image_bytes: bytes, brand: str, season: str) -> str:
+    """Send a video frame to Claude vision and get a precise fashion description."""
+    import anthropic
+    client = anthropic.AsyncAnthropic()
+    b64 = base64.standard_b64encode(image_bytes).decode()
+    message = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=80,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        f"You are a fashion intelligence system. Describe this {brand} {season} "
+                        f"runway look in one precise sentence under 25 words. "
+                        f"Focus on: garment type, silhouette, colour, fabric, key styling details. "
+                        f"Do not describe the model, runway, or setting. "
+                        f"Use specific fashion vocabulary."
+                    ),
+                },
+            ],
+        }],
+    )
+    return message.content[0].text.strip()
+
+
+async def _describe_clip_with_claude(brand: str, season: str, timestamp_start: float,
+                                      transcription: str = "", hls_url: Optional[str] = None) -> str:
+    """Describe a clip — uses vision if HLS URL provided, text fallback otherwise."""
+    if hls_url:
+        frame = await extract_frame(hls_url, timestamp_start)
+        if frame:
+            try:
+                return await describe_frame_with_claude(frame, brand, season)
+            except Exception as e:
+                logger.warning(f"Vision description failed at {timestamp_start}s: {e}")
+
+    # Text-only fallback
+    import anthropic
+    client = anthropic.AsyncAnthropic()
+    context = f"Brand: {brand}, Season: {season}, Timestamp: {timestamp_start:.0f}s"
+    if transcription:
+        context += f", Audio: \"{transcription[:200]}\""
+    message = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=60,
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Fashion intelligence system. One-sentence runway description under 20 words. "
+                f"Garment type, silhouette, colour, fabric, styling. No model. Fashion vocabulary.\n\n"
+                f"Context: {context}"
+            ),
+        }],
+    )
+    return message.content[0].text.strip()
+
+
+async def generate_look_descriptions(video_id: str, brand: str = "", season: str = "") -> list:
     """
-    # Step 1: Get timestamped clips via Marengo search
-    # Broad queries to capture the full range of looks
+    Extract timestamped looks from a show.
+    v1.3: search (multipart) to find clips, Claude for descriptions.
+    """
     look_queries = [
         "model walking on runway wearing outfit",
         "fashion look runway walk",
         "designer clothing on catwalk",
     ]
 
-    seen_timestamps = set()
+    seen_timestamps: set = set()
     raw_clips = []
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        for query in look_queries:
-            response = await client.post(
-                f"{TWELVE_LABS_BASE_URL}/search",
-                headers=get_headers(),
-                json={
-                    "index_id": INDEX_ID,
-                    "query": query,
-                    "search_options": ["visual"],
-                    "filter": {"id": [video_id]},
-                    "page_limit": 50,
-                    "threshold": "low",
-                },
-            )
-            if response.status_code != 200:
-                continue
-            for clip in response.json().get("data", []):
-                # Deduplicate by rounding start time to nearest 3 seconds
-                bucket = round(clip["start"] / 3) * 3
-                if bucket not in seen_timestamps:
-                    seen_timestamps.add(bucket)
-                    raw_clips.append(clip)
+    for query in look_queries:
+        clips = await _search_clips_for_video(video_id, query)
+        for clip in clips:
+            bucket = round(clip["start"] / 3) * 3
+            if bucket not in seen_timestamps:
+                seen_timestamps.add(bucket)
+                raw_clips.append(clip)
 
-    # Sort by start time
     raw_clips.sort(key=lambda c: c["start"])
     logger.info(f"Found {len(raw_clips)} distinct clips for video {video_id}")
 
+    # Fetch HLS URL once per video for frame extraction
+    hls_url = await get_hls_url(video_id)
+
     if not raw_clips:
-        # Fallback: use full-video Pegasus if no clips found
-        logger.warning(f"No clips found for {video_id}, falling back to full-video generation")
-        return await _generate_looks_fallback(video_id)
+        logger.warning(f"No clips found for {video_id}, creating single full-video moment")
+        return [{
+            "video_id": video_id,
+            "look_number": 1,
+            "description": f"{brand} {season} runway show".strip(),
+            "timestamp_start": 0.0,
+            "timestamp_end": 9999.0,
+            "thumbnail_url": None,
+            "score": 0,
+            "garments": [], "colours": [], "silhouette": None, "key_pieces": [],
+        }]
 
-    # Step 2: Run Pegasus on each clip for a precise description
     looks = []
-    look_number = 1
-    clip_prompt = (
-        "Describe this runway look precisely for fashion research. "
-        "Include: garment types, silhouette, colours, fabrics if identifiable, "
-        "key styling details. Do not describe the model. Under 40 words. "
-        "Use fashion vocabulary: e.g. 'structured ivory wool blazer with exaggerated shoulders "
-        "over wide-leg trousers, gold hardware belt'."
-    )
-
-    for clip in raw_clips:
+    for i, clip in enumerate(raw_clips, 1):
+        transcription = clip.get("transcription", "")
         try:
-            async with httpx.AsyncClient(timeout=45.0) as client:
-                response = await client.post(
-                    f"{TWELVE_LABS_BASE_URL}/generate",
-                    headers=get_headers(),
-                    json={
-                        "video_id": video_id,
-                        "prompt": clip_prompt,
-                        "temperature": 0.2,
-                        "start": clip["start"],
-                        "end": clip["end"],
-                    },
-                )
-
-            if response.status_code == 200:
-                description = response.json().get("data", "").strip()
-            else:
-                description = ""
-
-            looks.append({
-                "video_id": video_id,
-                "look_number": look_number,
-                "description": description or f"Look {look_number}",
-                "timestamp_start": clip["start"],
-                "timestamp_end": clip["end"],
-                "thumbnail_url": clip.get("thumbnail_url"),
-                "score": clip.get("score", 0),
-                "garments": [],
-                "colours": [],
-                "silhouette": None,
-                "key_pieces": [],
-            })
-            look_number += 1
-
-            # Respect Twelve Labs rate limits
-            await asyncio.sleep(0.5)
-
+            description = await _describe_clip_with_claude(
+                brand, season, clip["start"], transcription, hls_url=hls_url
+            )
         except Exception as e:
-            logger.warning(f"Failed to describe clip at {clip['start']}s: {e}")
-            continue
+            logger.warning(f"Claude description failed for clip {clip['start']}s: {e}")
+            description = f"{brand} {season} look {i}".strip()
+
+        looks.append({
+            "video_id": video_id,
+            "look_number": i,
+            "description": description,
+            "timestamp_start": clip["start"],
+            "timestamp_end": clip["end"],
+            "thumbnail_url": clip.get("thumbnail_url"),
+            "score": clip.get("score", 0),
+            "garments": [], "colours": [], "silhouette": None, "key_pieces": [],
+        })
+        await asyncio.sleep(0.3)
 
     logger.info(f"Generated {len(looks)} look descriptions for video {video_id}")
     return looks
 
 
-async def _generate_looks_fallback(video_id: str) -> list:
-    """
-    Fallback: full-video Pegasus generation when clip search returns nothing.
-    Used for older or non-standard footage that Marengo struggles to segment.
-    """
-    prompt = """
-    Analyse this fashion show video. For each distinct look (outfit change or model appearance):
-    1. Identify the look number in sequence
-    2. Describe the complete outfit: garments, fabrics, colours, silhouette
-    3. Note standout or signature pieces
-
-    Format each look as: Look N: [description]
-    Be specific and precise — this is for professional fashion research.
-    """
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(
-            f"{TWELVE_LABS_BASE_URL}/generate",
-            headers=get_headers(),
-            json={
-                "video_id": video_id,
-                "prompt": prompt,
-                "temperature": 0.2,
-            },
-        )
-        response.raise_for_status()
-        raw_text = response.json().get("data", "")
-
-    return _parse_look_descriptions(raw_text, video_id)
-
-
-async def get_video_summary(video_id: str) -> str:
-    """Generate a high-level summary of a show — themes, mood, direction."""
-    prompt = """
-    Provide a professional editorial summary of this fashion show:
-    - Overall creative direction and mood
-    - Key themes and references
-    - Dominant silhouettes and proportions
-    - Colour story
-    - Standout moments
-    - How this collection relates to broader fashion context
-
-    Write as a fashion editor, 150-200 words.
-    """
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            f"{TWELVE_LABS_BASE_URL}/generate",
-            headers=get_headers(),
-            json={
-                "video_id": video_id,
-                "prompt": prompt,
-                "temperature": 0.4,
-            },
-        )
-        response.raise_for_status()
-        return response.json().get("data", "")
+async def get_video_summary(video_id: str, brand: str = "", season: str = "") -> str:
+    """Generate a show summary using Claude."""
+    import anthropic
+    client = anthropic.AsyncAnthropic()
+    message = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=250,
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Write a professional editorial summary (150-200 words) of the {brand} {season} "
+                f"runway show. Cover creative direction, key themes, dominant silhouettes, colour story, "
+                f"and standout moments. Write as a fashion editor."
+            ),
+        }],
+    )
+    return message.content[0].text.strip()
 
 
 async def extract_credits(video_id: str) -> dict:

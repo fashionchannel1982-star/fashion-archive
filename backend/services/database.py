@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Mapped, relationship
 from sqlalchemy import String, Integer, Float, DateTime, JSON, ForeignKey, Text, select, func
 from sqlalchemy.dialects.postgresql import UUID
+from pgvector.sqlalchemy import Vector
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -73,6 +74,7 @@ class Moment(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     thumbnail_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     enriched_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    embedding: Mapped[Optional[list]] = mapped_column(Vector(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     show: Mapped["Show"] = relationship("Show", back_populates="moments")

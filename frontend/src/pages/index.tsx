@@ -5,6 +5,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import Hls from "hls.js";
 
 // ─────────────────────────────────────────
 // TYPES
@@ -62,11 +63,13 @@ function ResultCard({
   bookmarks,
   onBookmark,
   onExport,
+  onPlay,
 }: {
   result: SearchResult;
   bookmarks: Set<string>;
   onBookmark: (r: SearchResult) => void;
   onExport: (momentId: string, brand: string, ts: number) => void;
+  onPlay: (momentId: string) => void;
 }) {
   const isBookmarked = bookmarks.has(result.moment_id);
 
@@ -86,21 +89,52 @@ function ResultCard({
         (e.currentTarget.style.background = "#141414")
       }
     >
-      {/* Thumbnail */}
+      {/* Thumbnail — click to play */}
       <div
+        onClick={() => onPlay(result.moment_id)}
         style={{
           aspectRatio: "16/9",
           background: "#0F0F0F",
           position: "relative",
           overflow: "hidden",
+          cursor: "pointer",
         }}
       >
         {result.thumbnail_url ? (
-          <img
-            src={result.thumbnail_url}
-            alt={result.description}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
+          <>
+            <img
+              src={result.thumbnail_url}
+              alt={result.description}
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
+            {/* Play overlay — shown on hover of the outer div */}
+            <div style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}>
+              <div style={{
+                width: 44,
+                height: 44,
+                borderRadius: "50%",
+                background: "rgba(255,255,255,0.15)",
+                backdropFilter: "blur(6px)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 15,
+                color: "#F5F5F0",
+                paddingLeft: 3,
+                opacity: 0,
+                transition: "opacity 0.18s",
+              }}
+                className="play-btn"
+              >▶</div>
+            </div>
+          </>
         ) : (
           <div
             style={{
@@ -286,6 +320,238 @@ function ResultCard({
 }
 
 // ─────────────────────────────────────────
+// VIDEO MODAL
+// ─────────────────────────────────────────
+
+const MAX_CLIP_DURATION = 120; // seconds — hard cap per clip
+
+function VideoModal({
+  momentId,
+  brand,
+  season,
+  onClose,
+}: {
+  momentId: string;
+  brand: string;
+  season: string;
+  onClose: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0); // 0–1
+  const [clipDuration, setClipDuration] = useState(0);
+  const startRef = useRef(0);
+  const endRef = useRef(0);
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const res = await fetch(`${API_URL}/api/moments/${momentId}/play`);
+        if (!res.ok) throw new Error(`${res.status}`);
+        const data = await res.json();
+        if (cancelled || !videoRef.current) return;
+
+        const clipStart = data.timestamp_start;
+        // Cap: no longer than MAX_CLIP_DURATION, and no further than timestamp_end
+        const clipEnd = Math.min(
+          data.timestamp_end > clipStart ? data.timestamp_end : clipStart + MAX_CLIP_DURATION,
+          clipStart + MAX_CLIP_DURATION
+        );
+        startRef.current = clipStart;
+        endRef.current = clipEnd;
+        setClipDuration(clipEnd - clipStart);
+
+        const video = videoRef.current;
+
+        const onTimeUpdate = () => {
+          if (video.currentTime >= endRef.current) {
+            video.pause();
+            video.currentTime = endRef.current;
+          }
+          const elapsed = Math.max(0, video.currentTime - startRef.current);
+          setProgress(elapsed / (endRef.current - startRef.current));
+        };
+        video.addEventListener("timeupdate", onTimeUpdate);
+
+        if (Hls.isSupported()) {
+          const hls = new Hls({ startPosition: clipStart });
+          hlsRef.current = hls;
+          hls.loadSource(data.hls_url);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.currentTime = clipStart;
+            video.play().catch(() => {});
+          });
+        } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = data.hls_url;
+          video.currentTime = clipStart;
+          video.play().catch(() => {});
+        } else {
+          setError("HLS playback not supported in this browser.");
+        }
+
+        return () => video.removeEventListener("timeupdate", onTimeUpdate);
+      } catch {
+        if (!cancelled) setError("Could not load video stream.");
+      }
+    }
+
+    load();
+
+    return () => {
+      cancelled = true;
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
+    };
+  }, [momentId]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const elapsed = Math.round(progress * clipDuration);
+  const remaining = Math.round(clipDuration - elapsed);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.88)",
+        backdropFilter: "blur(8px)",
+        zIndex: 200,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 960,
+          background: "#111",
+          borderRadius: 10,
+          overflow: "hidden",
+          border: "1px solid rgba(255,255,255,0.08)",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "14px 20px",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{
+              fontFamily: "var(--font-display)",
+              fontSize: 14,
+              letterSpacing: "0.12em",
+              color: "#EDE8DC",
+            }}>
+              {brand.toUpperCase()} · {season}
+            </span>
+            {clipDuration > 0 && (
+              <span style={{
+                fontFamily: "var(--font-body)",
+                fontSize: 11,
+                color: "#8A8A85",
+                letterSpacing: "0.05em",
+              }}>
+                {formatTimestamp(startRef.current)} — {formatTimestamp(endRef.current)}
+                {clipDuration >= MAX_CLIP_DURATION && (
+                  <span style={{ color: "#555", marginLeft: 6 }}>· clipped to 2 min</span>
+                )}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#8A8A85",
+              cursor: "pointer",
+              fontSize: 20,
+              lineHeight: 1,
+              padding: "0 4px",
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Video */}
+        <div style={{ position: "relative", aspectRatio: "16/9", background: "#000" }}>
+          {error ? (
+            <div style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: "var(--font-body)",
+              fontSize: 13,
+              color: "#8A8A85",
+            }}>
+              {error}
+            </div>
+          ) : (
+            <video
+              ref={videoRef}
+              controls
+              style={{ width: "100%", height: "100%", display: "block" }}
+            />
+          )}
+        </div>
+
+        {/* Clip progress bar */}
+        {clipDuration > 0 && (
+          <div style={{ padding: "10px 20px 14px", background: "#0D0D0D" }}>
+            <div style={{
+              height: 2,
+              background: "rgba(255,255,255,0.07)",
+              borderRadius: 1,
+              overflow: "hidden",
+            }}>
+              <div style={{
+                height: "100%",
+                width: `${progress * 100}%`,
+                background: "#EDE8DC",
+                borderRadius: 1,
+                transition: "width 0.2s linear",
+              }} />
+            </div>
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginTop: 6,
+              fontFamily: "var(--font-body)",
+              fontSize: 10,
+              color: "#555",
+              letterSpacing: "0.05em",
+            }}>
+              <span>+{elapsed}s</span>
+              <span>−{remaining}s</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────
 // BOOKMARK PANEL
 // ─────────────────────────────────────────
 
@@ -435,6 +701,7 @@ export default function Home() {
   const [processingTime, setProcessingTime] = useState<number | null>(null);
   const [bookmarks, setBookmarks] = useState<Map<string, SearchResult>>(new Map());
   const [showBookmarks, setShowBookmarks] = useState(false);
+  const [playingMoment, setPlayingMoment] = useState<{ id: string; brand: string; season: string } | null>(null);
   const debounceRef = useRef<NodeJS.Timeout>();
 
   // Load bookmarks from localStorage on mount
@@ -618,16 +885,6 @@ export default function Home() {
               >
                 FASHION ARCHIVE
               </h1>
-              <p
-                style={{
-                  fontFamily: "var(--font-body)",
-                  fontSize: 13,
-                  letterSpacing: "0.1em",
-                  color: "#8A8A85",
-                }}
-              >
-                Chanel · Dior · Gucci &nbsp;·&nbsp; AW 25/26
-              </p>
             </div>
           )}
 
@@ -671,7 +928,7 @@ export default function Home() {
                 top: "50%",
                 transform: "translateY(-50%)",
                 color: "#8A8A85",
-                fontSize: 15,
+                fontSize: 20,
                 pointerEvents: "none",
               }}
             >
@@ -738,6 +995,7 @@ export default function Home() {
                 bookmarks={new Set(bookmarks.keys())}
                 onBookmark={handleBookmark}
                 onExport={handleExport}
+                onPlay={(id) => setPlayingMoment({ id, brand: r.brand, season: r.season })}
               />
             ))}
           </div>
@@ -774,6 +1032,20 @@ export default function Home() {
           onClose={() => setShowBookmarks(false)}
         />
       )}
+
+      {/* Video modal */}
+      {playingMoment && (
+        <VideoModal
+          momentId={playingMoment.id}
+          brand={playingMoment.brand}
+          season={playingMoment.season}
+          onClose={() => setPlayingMoment(null)}
+        />
+      )}
+
+      <style>{`
+        div:has(> .play-btn):hover .play-btn { opacity: 1 !important; }
+      `}</style>
     </>
   );
 }
