@@ -29,6 +29,32 @@ INDEX_ID = os.getenv("TWELVE_LABS_INDEX_ID")
 # Recalibrate in Phase 6 with full score distributions.
 SIMILARITY_THRESHOLD = 0.06
 
+# Known brands — used to extract brand filter from free-text queries
+KNOWN_BRANDS = [
+    "Chanel", "Dior", "Gucci", "Valentino", "Versace", "Prada", "Miu Miu",
+    "Loewe", "Hermès", "Hermes", "Fendi", "Givenchy", "Celine", "Céline",
+    "Balenciaga", "Bottega Veneta", "Burberry", "Louis Vuitton",
+    "Alexander McQueen", "Saint Laurent", "Rick Owens", "Jacquemus",
+    "Jil Sander", "Issey Miyake", "Maison Margiela", "Vivienne Westwood",
+]
+
+
+def extract_brand_from_query(query: str):
+    """
+    Return (brand_name_or_None, cleaned_query_without_brand).
+    Removes the matched brand token from the query so the embedding focuses
+    on visual attributes only (Marengo can't encode brand names anyway).
+    """
+    q_lower = query.lower()
+    for brand in KNOWN_BRANDS:
+        if brand.lower() in q_lower:
+            cleaned = query.replace(brand, "").replace(brand.lower(), "").strip(" ,")
+            # collapse double spaces
+            import re
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+            return brand, cleaned or query
+    return None, query
+
 
 def get_headers() -> dict:
     return {
@@ -343,13 +369,17 @@ async def semantic_search(
     from services.database import AsyncSessionLocal, Moment, Show
     from sqlalchemy import select, text as sql_text
 
+    # Extract brand from query so pgvector embeds visual terms only
+    brand_filter, visual_query = extract_brand_from_query(query)
+
     # Try pgvector path first
-    query_vec = await embed_text(query)
+    query_vec = await embed_text(visual_query)
     if query_vec:
         try:
             # Format floats to avoid scientific notation (pgvector can't parse 1e-05)
             vec_str = "[" + ",".join(f"{v:.8f}" for v in query_vec) + "]"
-            # Interpolate directly — safe since vec_str is machine-generated floats only
+            brand_clause = f"AND s.brand ILIKE '{brand_filter.replace(chr(39), chr(39)*2)}'" if brand_filter else ""
+            # Interpolate directly — safe: vec_str is machine-generated floats, brand_clause uses ILIKE with single-quote escape
             async with AsyncSessionLocal() as session:
                 rows = await session.execute(
                     sql_text(f"""
@@ -357,7 +387,9 @@ async def semantic_search(
                                m.description, m.thumbnail_url,
                                m.embedding <=> '{vec_str}'::vector AS distance
                         FROM moments m
+                        JOIN shows s ON s.id = m.show_id
                         WHERE m.embedding IS NOT NULL
+                        {brand_clause}
                         ORDER BY m.embedding <=> '{vec_str}'::vector
                         LIMIT {limit}
                     """)
