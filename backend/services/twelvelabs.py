@@ -23,11 +23,10 @@ API_KEY = os.getenv("TWELVE_LABS_API_KEY")
 INDEX_ID = os.getenv("TWELVE_LABS_INDEX_ID")
 
 # Minimum cosine similarity to include a result.
-# Marengo3.0 text↔image cross-modal similarity clusters 0.06–0.14 for fashion queries;
-# off-target queries (e.g. "pizza") return ~-0.01 to -0.04.
-# 0.06 keeps all genuine fashion matches while filtering noise and off-target queries.
-# Recalibrate in Phase 6 with full score distributions.
-SIMILARITY_THRESHOLD = 0.06
+# Marengo3.0 text↔image cross-modal similarity clusters 0.06–0.14 for fashion queries.
+# 0.09 = "Good" band floor — suppress "Relevant" results entirely since wrong-colour
+# near-misses (blue skirt for black, orange skirt) erode trust more than no result.
+SIMILARITY_THRESHOLD = 0.09
 
 # Known brands — used to extract brand filter from free-text queries
 KNOWN_BRANDS = [
