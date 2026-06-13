@@ -702,6 +702,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 export default function Home() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [weakMatch, setWeakMatch] = useState(false);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [processingTime, setProcessingTime] = useState<number | null>(null);
@@ -732,6 +733,7 @@ export default function Home() {
   const runSearch = useCallback(async (q: string) => {
     if (!q.trim()) {
       setResults([]);
+      setWeakMatch(false);
       setHasSearched(false);
       return;
     }
@@ -744,6 +746,7 @@ export default function Home() {
       });
       const data: SearchResponse = await res.json();
       setResults(data.results);
+      setWeakMatch(data.results.length > 0 && data.results.every((r) => r.confidence < 12));
       setProcessingTime(data.processing_time_ms);
       setHasSearched(true);
     } catch (err) {
@@ -996,6 +999,30 @@ export default function Home() {
             </div>
           )}
         </div>
+
+        {/* Weak match warning */}
+        {hasSearched && weakMatch && (
+          <div
+            style={{
+              maxWidth: 640,
+              margin: "0 auto 20px",
+              padding: "10px 16px",
+              borderRadius: 6,
+              background: "#1C1500",
+              border: "1px solid #3D2E00",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontFamily: "var(--font-body)",
+              fontSize: 12,
+              color: "#FACC15",
+              letterSpacing: "0.03em",
+            }}
+          >
+            <span style={{ fontSize: 14 }}>⚠</span>
+            No strong match found in the archive — showing closest results
+          </div>
+        )}
 
         {/* Results grid */}
         {hasSearched && results.length > 0 && (
