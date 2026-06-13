@@ -36,8 +36,12 @@ interface SearchResponse {
 // HELPERS
 // ─────────────────────────────────────────
 
-// Bands calibrated to Marengo3.0 text↔image cross-modal similarity range (0.06–0.14).
-// confidence = round(similarity * 100), so range is roughly 6–14.
+// confidence from backend = round(similarity * 100), range ~6–14.
+// Display on 0–10 scale: normalize to observed max of 14.
+function confidenceDisplay(c: number): string {
+  return Math.min(10, Math.round((c / 14) * 10)).toString();
+}
+
 function confidenceLabel(c: number): string {
   if (c >= 12) return "Strong";
   if (c >= 9) return "Good";
@@ -240,7 +244,7 @@ function ResultCard({
                 display: "inline-block",
               }}
             />
-            {result.confidence}% · {confidenceLabel(result.confidence)}
+            {confidenceDisplay(result.confidence)}/10 · {confidenceLabel(result.confidence)}
           </span>
         </div>
 
@@ -1061,9 +1065,6 @@ export default function Home() {
         />
       )}
 
-      <style>{`
-        div:has(> .play-btn):hover .play-btn { opacity: 1 !important; }
-      `}</style>
     </>
   );
 }

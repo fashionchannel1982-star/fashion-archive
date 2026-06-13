@@ -16,3 +16,4 @@ input:focus { outline: none; }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2A2A2A; border-radius: 2px; }
+div:has(> .play-btn):hover .play-btn { opacity: 1 !important; }
