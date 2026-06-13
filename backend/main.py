@@ -17,6 +17,7 @@ Endpoints:
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 import time
@@ -43,7 +44,16 @@ app.add_middleware(
 # ─────────────────────────────────────────
 
 from routers.ingest import router as ingest_router
+from services.twelvelabs import _is_valid_description
 app.include_router(ingest_router, prefix="/api/ingest", tags=["ingest"])
+
+# ─────────────────────────────────────────
+# STATIC FILES — thumbnails
+# ─────────────────────────────────────────
+
+_thumbnails_dir = os.path.join(os.path.dirname(__file__), "static", "thumbnails")
+os.makedirs(_thumbnails_dir, exist_ok=True)
+app.mount("/static/thumbnails", StaticFiles(directory=_thumbnails_dir), name="thumbnails")
 
 
 # ─────────────────────────────────────────
@@ -120,9 +130,6 @@ async def search(req: SearchRequest):
             score = item.get("score", 0.0)
             confidence = round(score * 100)
 
-            if confidence < 30:
-                continue
-
             # pgvector path returns _moment_id directly; TL path uses video_id + timestamp
             moment_id = item.get("_moment_id")
             if moment_id:
@@ -146,7 +153,12 @@ async def search(req: SearchRequest):
             if row:
                 moment, show = row
                 enriched = moment.enriched_data or {}
-                description = enriched.get("description") or moment.description or "No description available."
+                description = enriched.get("description") or moment.description or ""
+
+                # Skip results whose description is a hedge, refusal, or placeholder
+                if not _is_valid_description(description):
+                    continue
+
                 results.append({
                     "moment_id": moment.id,
                     "show_id": show.id,

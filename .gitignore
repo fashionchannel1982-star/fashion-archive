@@ -18,3 +18,7 @@ frontend/out/
 # misc
 .DS_Store
 *.log
+*.zip
+backend/static/thumbnails/
+frontend/tsconfig.tsbuildinfo
+.claude/

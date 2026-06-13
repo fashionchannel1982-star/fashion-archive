@@ -22,6 +22,13 @@ TWELVE_LABS_BASE_URL = "https://api.twelvelabs.io/v1.3"
 API_KEY = os.getenv("TWELVE_LABS_API_KEY")
 INDEX_ID = os.getenv("TWELVE_LABS_INDEX_ID")
 
+# Minimum cosine similarity to include a result.
+# Marengo3.0 text↔image cross-modal similarity clusters 0.06–0.14 for fashion queries;
+# off-target queries (e.g. "pizza") return ~-0.01 to -0.04.
+# 0.06 keeps all genuine fashion matches while filtering noise and off-target queries.
+# Recalibrate in Phase 6 with full score distributions.
+SIMILARITY_THRESHOLD = 0.06
+
 
 def get_headers() -> dict:
     return {
@@ -358,8 +365,6 @@ async def semantic_search(
                 pgvec_results = rows.fetchall()
 
             if pgvec_results:
-                # Normalize scores: top result → ~0.95, rest scale down linearly
-                n = len(pgvec_results)
                 show_ids = list({r.show_id for r in pgvec_results})
                 async with AsyncSessionLocal() as session:
                     shows_rows = await session.execute(
@@ -368,13 +373,16 @@ async def semantic_search(
                     shows_map = {s.id: s for s in shows_rows.scalars().all()}
 
                 results = []
-                for i, r in enumerate(pgvec_results):
+                for r in pgvec_results:
+                    # distance is cosine distance (0=identical, 2=opposite for unit vectors)
+                    # similarity = 1 - distance (pgvector cosine op returns 1 - cosine_similarity)
+                    similarity = 1.0 - float(r.distance)
+                    if similarity < SIMILARITY_THRESHOLD:
+                        continue
                     show = shows_map.get(r.show_id)
-                    # Rank-normalized score: position 0 → 0.95, last → 0.30
-                    score = 0.95 - (i / max(n - 1, 1)) * 0.65
                     results.append({
                         "video_id": show.video_id if show else None,
-                        "score": round(score, 4),
+                        "score": round(similarity, 4),
                         "start": r.timestamp_start,
                         "end": r.timestamp_end,
                         "thumbnail_url": r.thumbnail_url,
@@ -425,11 +433,17 @@ async def semantic_search(
 
     results = []
     for clip in clips:
-        rank = clip.get("rank", total)
-        score = max(0.0, 1.0 - (rank - 1) / max(total, 1))
+        # Use TL's real score (0.0–1.0); fall back to rank-derived only if absent
+        score = clip.get("score")
+        if score is None:
+            rank = clip.get("rank", total)
+            score = max(0.0, 1.0 - (rank - 1) / max(total, 1))
+        score = float(score)
+        if score < SIMILARITY_THRESHOLD:
+            continue
         results.append({
             "video_id": clip["video_id"],
-            "score": score,
+            "score": round(score, 4),
             "start": clip.get("start", 0),
             "end": clip.get("end", 0),
             "thumbnail_url": thumbnails.get(clip["video_id"]),
@@ -499,35 +513,50 @@ async def extract_frame(hls_url: str, timestamp: float) -> Optional[bytes]:
         return None
 
 
-async def describe_frame_with_claude(image_bytes: bytes, brand: str, season: str) -> str:
-    """Send a video frame to Claude vision and get a precise fashion description."""
+async def describe_frame_with_claude(image_bytes: bytes, brand: str = "", season: str = "",
+                                      _attempt: int = 0) -> str:
+    """
+    Describe a runway frame using Claude Haiku vision.
+    Brand/season are NOT included in the prompt — garment description only.
+    Attribution comes from show metadata at display time.
+    Retries on 429 rate-limit with backoff (up to 3 attempts).
+    """
     import anthropic
     client = anthropic.AsyncAnthropic()
     b64 = base64.standard_b64encode(image_bytes).decode()
-    message = await client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=80,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        f"You are a fashion intelligence system. Describe this {brand} {season} "
-                        f"runway look in one precise sentence under 25 words. "
-                        f"Focus on: garment type, silhouette, colour, fabric, key styling details. "
-                        f"Do not describe the model, runway, or setting. "
-                        f"Use specific fashion vocabulary."
-                    ),
-                },
-            ],
-        }],
-    )
-    return message.content[0].text.strip()
+    try:
+        message = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=80,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Describe the garment worn by the model in this runway image in one precise sentence under 25 words. "
+                            "Include: garment type, silhouette, colour, fabric or texture, and one key styling detail. "
+                            "Do not describe the model's appearance, the runway, the setting, or name any fashion house."
+                        ),
+                    },
+                ],
+            }],
+        )
+    except anthropic.RateLimitError:
+        if _attempt < 3:
+            wait = 30 * (2 ** _attempt)  # 30s, 60s, 120s
+            logger.warning(f"Claude Haiku rate-limited (attempt {_attempt + 1}), retrying in {wait}s")
+            await asyncio.sleep(wait)
+            return await describe_frame_with_claude(image_bytes, brand, season, _attempt=_attempt + 1)
+        raise
+    text = message.content[0].text.strip()
+    # Strip any markdown headers Haiku occasionally adds, collapse to single line
+    lines = [l for l in text.splitlines() if not l.startswith("#")]
+    return " ".join(" ".join(lines).split())
 
 
 async def _describe_clip_with_claude(brand: str, season: str, timestamp_start: float,
@@ -562,71 +591,249 @@ async def _describe_clip_with_claude(brand: str, season: str, timestamp_start: f
     return message.content[0].text.strip()
 
 
-async def generate_look_descriptions(video_id: str, brand: str = "", season: str = "") -> list:
+STATIC_THUMBNAILS_DIR = os.path.join(os.path.dirname(__file__), "..", "static", "thumbnails")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+
+
+def save_thumbnail(moment_id: str, image_bytes: bytes) -> str:
     """
-    Extract timestamped looks from a show.
-    v1.3: search (multipart) to find clips, Claude for descriptions.
+    Save JPEG bytes to static/thumbnails/{moment_id}.jpg and return the URL.
+    Creates the directory if missing.
     """
-    look_queries = [
-        "model walking on runway wearing outfit",
-        "fashion look runway walk",
-        "designer clothing on catwalk",
-    ]
+    os.makedirs(STATIC_THUMBNAILS_DIR, exist_ok=True)
+    path = os.path.join(STATIC_THUMBNAILS_DIR, f"{moment_id}.jpg")
+    with open(path, "wb") as f:
+        f.write(image_bytes)
+    return f"{API_BASE_URL}/static/thumbnails/{moment_id}.jpg"
 
-    seen_timestamps: set = set()
-    raw_clips = []
 
-    for query in look_queries:
-        clips = await _search_clips_for_video(video_id, query)
-        for clip in clips:
-            bucket = round(clip["start"] / 3) * 3
-            if bucket not in seen_timestamps:
-                seen_timestamps.add(bucket)
-                raw_clips.append(clip)
+_HEDGE_PHRASES = [
+    "i can see", "cannot definitively identify", "i'm unable", "i cannot",
+    "appears to be a runway", "it appears", "it seems", "i think", "i believe",
+    "likely", "probably", "hard to tell", "difficult to determine",
+]
+_PLACEHOLDER_RE = None
 
-    raw_clips.sort(key=lambda c: c["start"])
-    logger.info(f"Found {len(raw_clips)} distinct clips for video {video_id}")
 
-    # Fetch HLS URL once per video for frame extraction
-    hls_url = await get_hls_url(video_id)
+def _is_valid_description(text: str) -> bool:
+    """
+    Return False if the description is a hedge, refusal, or placeholder.
+    Brand/season "look N" placeholders and short outputs are also rejected.
+    """
+    import re
+    global _PLACEHOLDER_RE
+    if _PLACEHOLDER_RE is None:
+        _PLACEHOLDER_RE = re.compile(r"\blook\s+\d+\b", re.I)
 
-    if not raw_clips:
-        logger.warning(f"No clips found for {video_id}, creating single full-video moment")
-        return [{
+    if not text or len(text.strip()) < 15:
+        return False
+    low = text.lower()
+    for phrase in _HEDGE_PHRASES:
+        if phrase in low:
+            return False
+    if _PLACEHOLDER_RE.search(text):
+        return False
+    # "— look at Ns" pattern
+    if "look at" in low:
+        return False
+    return True
+
+
+async def _stream_analyze(video_id: str, prompt: str,
+                           start: Optional[float] = None,
+                           end: Optional[float] = None,
+                           _attempt: int = 0) -> str:
+    """
+    POST /analyze with optional start/end segment, collect streamed NDJSON → full text.
+    Retries up to 2 times on ReadTimeout with increasing backoff.
+    """
+    import json
+    payload: dict = {"video_id": video_id, "prompt": prompt, "temperature": 0.1}
+    if start is not None:
+        payload["start"] = start
+    if end is not None:
+        payload["end"] = end
+
+    # Use explicit Timeout object: connect/write short, read long (Pegasus streams slowly)
+    _timeout = httpx.Timeout(connect=30.0, read=240.0, write=30.0, pool=30.0)
+
+    text_parts = []
+    try:
+        async with httpx.AsyncClient(timeout=_timeout) as client:
+            async with client.stream(
+                "POST",
+                f"{TWELVE_LABS_BASE_URL}/analyze",
+                headers=get_headers(),
+                json=payload,
+            ) as response:
+                if response.status_code != 200:
+                    body = await response.aread()
+                    logger.warning(f"_stream_analyze {response.status_code}: {body[:200]}")
+                    return ""
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                        if obj.get("event_type") == "text_generation":
+                            text_parts.append(obj.get("text", ""))
+                    except Exception:
+                        pass
+    except (httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+        if _attempt < 2:
+            wait = 15 * (2 ** _attempt)  # 15s, 30s
+            logger.warning(f"_stream_analyze timeout (attempt {_attempt + 1}), retrying in {wait}s")
+            await asyncio.sleep(wait)
+            return await _stream_analyze(video_id, prompt, start=start, end=end, _attempt=_attempt + 1)
+        logger.error(f"_stream_analyze gave up after 3 attempts: {exc}")
+        raise
+
+    return "".join(text_parts)
+
+
+def _parse_pegasus_looks(raw_text: str, video_id: str) -> list:
+    """
+    Parse Pegasus structured output: 'Look N | START | END | description'
+    Also handles the legacy 'Look N' split format as fallback.
+    Returns list of look dicts with timestamp_start/end and description.
+    """
+    import re
+    looks = []
+
+    # Primary: pipe-delimited format produced by our structured prompt
+    pipe_pattern = re.compile(
+        r"Look\s+(\d+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|(.+?)(?=\nLook\s+\d+|\Z)",
+        re.IGNORECASE | re.DOTALL,
+    )
+    matches = pipe_pattern.findall(raw_text)
+
+    if matches:
+        for look_num, start_s, end_s, desc in matches:
+            desc = desc.strip().split("\n")[0].strip()  # first line only
+            looks.append({
+                "video_id": video_id,
+                "look_number": int(look_num),
+                "description": desc if _is_valid_description(desc) else None,
+                "timestamp_start": float(start_s),
+                "timestamp_end": float(end_s),
+                "thumbnail_url": None,
+                "score": 0,
+                "garments": [], "colours": [], "silhouette": None, "key_pieces": [],
+            })
+        return looks
+
+    # Fallback: legacy 'Look N' split (no timestamps — caller must merge with clip list)
+    sections = re.split(r"Look\s+(\d+)", raw_text, flags=re.IGNORECASE)
+    for i in range(1, len(sections), 2):
+        desc = sections[i + 1].strip() if i + 1 < len(sections) else ""
+        looks.append({
             "video_id": video_id,
-            "look_number": 1,
-            "description": f"{brand} {season} runway show".strip(),
+            "look_number": int(sections[i]),
+            "description": desc if _is_valid_description(desc) else None,
             "timestamp_start": 0.0,
-            "timestamp_end": 9999.0,
+            "timestamp_end": 0.0,
             "thumbnail_url": None,
             "score": 0,
             "garments": [], "colours": [], "silhouette": None, "key_pieces": [],
-        }]
-
-    looks = []
-    for i, clip in enumerate(raw_clips, 1):
-        transcription = clip.get("transcription", "")
-        try:
-            description = await _describe_clip_with_claude(
-                brand, season, clip["start"], transcription, hls_url=hls_url
-            )
-        except Exception as e:
-            logger.warning(f"Claude description failed for clip {clip['start']}s: {e}")
-            description = f"{brand} {season} look {i}".strip()
-
-        looks.append({
-            "video_id": video_id,
-            "look_number": i,
-            "description": description,
-            "timestamp_start": clip["start"],
-            "timestamp_end": clip["end"],
-            "thumbnail_url": clip.get("thumbnail_url"),
-            "score": clip.get("score", 0),
-            "garments": [], "colours": [], "silhouette": None, "key_pieces": [],
         })
-        await asyncio.sleep(0.3)
+    return looks
 
-    logger.info(f"Generated {len(looks)} look descriptions for video {video_id}")
+
+async def describe_segment_with_pegasus(video_id: str, start: float, end: float) -> Optional[str]:
+    """
+    Per-segment Pegasus call for a single look (fallback when one-call output is vague).
+    Returns a valid description string or None.
+    IMPORTANT: prompt never mentions brand/house — garment description only.
+    """
+    prompt = (
+        "Describe the garment worn by the model in this segment in one precise sentence under 25 words. "
+        "Include: garment type, silhouette, colour, fabric or texture, and one key styling detail. "
+        "Do not describe the model's appearance, the runway, the setting, or name any fashion house."
+    )
+    text = await _stream_analyze(video_id, prompt, start=start, end=end)
+    if _is_valid_description(text):
+        return text.strip()
+    return None
+
+
+async def generate_look_descriptions(video_id: str, brand: str = "", season: str = "") -> list:
+    """
+    Extract timestamped looks from a show using Pegasus via POST /analyze.
+    One structured call per show; per-segment fallback for vague looks.
+    Brand/season are NOT passed to Pegasus — garment description only.
+    Attribution (brand, season) comes from the shows row at storage/display time.
+    """
+    # One-call structured prompt — asks for pipe-delimited look list with timestamps
+    prompt = (
+        "List every runway look in this show in chronological order. "
+        "For each individual model's walk, output exactly this format on one line:\n"
+        "Look N | START | END | description\n"
+        "Where START and END are times in seconds (integers), and description is one precise sentence "
+        "under 25 words covering: garment type, silhouette, colour, fabric or texture, key styling detail. "
+        "Do not name any fashion house or brand. Do not describe the model's face or body. "
+        "Do not describe the runway or setting. "
+        "If multiple models walk together, list each as a separate look."
+    )
+
+    raw = await _stream_analyze(video_id, prompt)
+    looks = _parse_pegasus_looks(raw, video_id)
+
+    if not looks:
+        logger.warning(f"Pegasus returned no parseable looks for {video_id} — falling back to search clips")
+        # Fall back to TL search clips to get timestamps, then per-segment Pegasus
+        look_queries = ["model walking on runway wearing outfit", "fashion look runway walk"]
+        seen: set = set()
+        raw_clips = []
+        for query in look_queries:
+            for clip in await _search_clips_for_video(video_id, query):
+                bucket = round(clip["start"] / 3) * 3
+                if bucket not in seen:
+                    seen.add(bucket)
+                    raw_clips.append(clip)
+        raw_clips.sort(key=lambda c: c["start"])
+        for i, clip in enumerate(raw_clips, 1):
+            desc = await describe_segment_with_pegasus(video_id, clip["start"], clip["end"])
+            looks.append({
+                "video_id": video_id,
+                "look_number": i,
+                "description": desc,
+                "timestamp_start": clip["start"],
+                "timestamp_end": clip["end"],
+                "thumbnail_url": None,
+                "score": clip.get("score", 0),
+                "garments": [], "colours": [], "silhouette": None, "key_pieces": [],
+            })
+        if not looks:
+            return []
+
+    # Fetch HLS URL once — needed for frame extraction
+    hls_url = await get_hls_url(video_id)
+
+    # Per-segment pass: fix vague descriptions + extract thumbnails
+    vague_count = 0
+    for look in looks:
+        # Midpoint frame for both thumbnail and embedding (Phase 4)
+        midpoint = (look["timestamp_start"] + look["timestamp_end"]) / 2.0
+        frame = await extract_frame(hls_url, midpoint) if hls_url else None
+
+        # Fix vague/null descriptions with per-segment Pegasus call
+        if not _is_valid_description(look["description"] or ""):
+            desc = await describe_segment_with_pegasus(
+                video_id, look["timestamp_start"], look["timestamp_end"]
+            )
+            look["description"] = desc
+            if desc is None:
+                vague_count += 1
+
+        # Store frame on look for caller to save after moment ID is known
+        look["_frame"] = frame
+        await asyncio.sleep(0.15)
+
+    if vague_count:
+        logger.info(f"{vague_count} looks left null (vague/refused) for video {video_id}")
+
+    logger.info(f"Generated {len(looks)} looks for video {video_id} via Pegasus")
     return looks
 
 
@@ -653,29 +860,16 @@ async def extract_credits(video_id: str) -> dict:
     """
     Extract visible credits, name cards, and any text overlaid on the video.
     Used for attribution — who worked on what.
+    Uses /analyze (POST /generate was removed in v1.3).
     """
-    prompt = """
-    Extract all credits and attribution information visible in this video:
-    - Any text overlays, name cards, or title sequences
-    - Brand name and season if shown
-    - Any designer, creative director, or collaborator names mentioned
-    - Sponsor or partner names if visible
-
-    Return as structured list.
-    """
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{TWELVE_LABS_BASE_URL}/generate",
-            headers=get_headers(),
-            json={
-                "video_id": video_id,
-                "prompt": prompt,
-                "temperature": 0.1,
-            },
-        )
-        response.raise_for_status()
-        return {"raw": response.json().get("data", "")}
+    prompt = (
+        "Extract all credits and attribution information visible in this video: "
+        "any text overlays, name cards, or title sequences; brand name and season if shown; "
+        "any designer, creative director, or collaborator names mentioned; "
+        "sponsor or partner names if visible. Return as a structured list."
+    )
+    raw = await _stream_analyze(video_id, prompt)
+    return {"raw": raw}
 
 
 # ─────────────────────────────────────────

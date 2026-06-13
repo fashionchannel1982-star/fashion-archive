@@ -139,7 +139,9 @@ async def ingest_local_file(
 async def _process_after_ingestion(show_id: str, task_id: str):
     import asyncio
     from services.claude import enrich_look, generate_show_editorial
-    from services.database import AsyncSessionLocal
+    from services.database import AsyncSessionLocal, Moment
+    from services.twelvelabs import save_thumbnail
+    from sqlalchemy import select, update
 
     async with AsyncSessionLocal() as session:
         try:
@@ -158,19 +160,38 @@ async def _process_after_ingestion(show_id: str, task_id: str):
             raw_looks = await twelvelabs.generate_look_descriptions(video_id)
 
             enriched_looks = []
+            frames = {}  # timestamp_start → frame bytes
             for raw_look in raw_looks:
                 enriched = await enrich_look(raw_description=raw_look.get("description", ""), show_context=show_context)
+                ts = raw_look.get("timestamp_start", 0)
+                if raw_look.get("_frame"):
+                    frames[ts] = raw_look["_frame"]
                 enriched_looks.append({
                     "show_id": show_id,
                     "look_number": raw_look.get("look_number", 0),
-                    "description": raw_look.get("description", ""),
+                    "description": raw_look.get("description"),
                     "enriched_data": enriched,
-                    "timestamp_start": raw_look.get("timestamp_start", 0),
+                    "timestamp_start": ts,
                     "timestamp_end": raw_look.get("timestamp_end", 0),
-                    "thumbnail_url": raw_look.get("thumbnail_url"),
+                    "thumbnail_url": None,  # patched below after IDs are known
                 })
 
             await db.bulk_create_looks(session, enriched_looks)
+
+            # Patch thumbnail_url now that moment IDs exist
+            if frames:
+                rows = (await session.execute(
+                    select(Moment).where(Moment.show_id == show_id)
+                )).scalars().all()
+                for moment in rows:
+                    frame = frames.get(moment.timestamp_start)
+                    if frame:
+                        url = save_thumbnail(str(moment.id), frame)
+                        await session.execute(
+                            update(Moment).where(Moment.id == moment.id).values(thumbnail_url=url)
+                        )
+                await session.commit()
+
             editorial = await generate_show_editorial(show_context, enriched_looks)
             await db.update_show_status(session, show_id, status="ready", video_id=video_id, looks_count=len(enriched_looks), summary=editorial)
             logger.info(f"Processing complete: {show.brand} {show.season} — {len(enriched_looks)} looks")

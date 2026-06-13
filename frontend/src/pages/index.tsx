@@ -36,15 +36,17 @@ interface SearchResponse {
 // HELPERS
 // ─────────────────────────────────────────
 
+// Bands calibrated to Marengo3.0 text↔image cross-modal similarity range (0.06–0.14).
+// confidence = round(similarity * 100), so range is roughly 6–14.
 function confidenceLabel(c: number): string {
-  if (c >= 90) return "Exact";
-  if (c >= 75) return "Strong";
+  if (c >= 12) return "Strong";
+  if (c >= 9) return "Good";
   return "Relevant";
 }
 
 function confidenceColor(c: number): string {
-  if (c >= 90) return "#4ADE80";
-  if (c >= 75) return "#FACC15";
+  if (c >= 12) return "#4ADE80";
+  if (c >= 9) return "#FACC15";
   return "#94A3B8";
 }
 
