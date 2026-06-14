@@ -67,17 +67,22 @@ function formatTimestamp(seconds: number): string {
 function ResultCard({
   result,
   bookmarks,
+  pinned,
   onBookmark,
+  onPin,
   onExport,
   onPlay,
 }: {
   result: SearchResult;
   bookmarks: Set<string>;
+  pinned: Set<string>;
   onBookmark: (r: SearchResult) => void;
+  onPin: (r: SearchResult) => void;
   onExport: (momentId: string, brand: string, ts: number) => void;
   onPlay: (momentId: string) => void;
 }) {
   const isBookmarked = bookmarks.has(result.moment_id);
+  const isPinned = pinned.has(result.moment_id);
 
   return (
     <div
@@ -267,55 +272,49 @@ function ResultCard({
         </p>
 
         {/* Actions */}
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             onClick={() => onBookmark(result)}
-            title={isBookmarked ? "Remove bookmark" : "Bookmark"}
+            title={isBookmarked ? "Remove bookmark" : "Save"}
             style={{
-              background: isBookmarked
-                ? "rgba(237,232,220,0.12)"
-                : "rgba(255,255,255,0.04)",
+              background: isBookmarked ? "rgba(237,232,220,0.12)" : "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 4,
-              padding: "5px 10px",
-              cursor: "pointer",
-              fontFamily: "var(--font-body)",
-              fontSize: 11,
+              borderRadius: 4, padding: "5px 10px", cursor: "pointer",
+              fontFamily: "var(--font-body)", fontSize: 11,
               color: isBookmarked ? "#EDE8DC" : "#8A8A85",
-              transition: "all 0.15s",
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
+              transition: "all 0.15s", display: "flex", alignItems: "center", gap: 5,
             }}
           >
             {isBookmarked ? "✦ Saved" : "✦ Save"}
           </button>
 
           <button
-            onClick={() =>
-              onExport(result.moment_id, result.brand, result.timestamp_start)
-            }
+            onClick={() => onPin(result)}
+            title={isPinned ? "Remove from board" : "Add to mood board"}
+            style={{
+              background: isPinned ? "rgba(74,222,128,0.12)" : "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 4, padding: "5px 10px", cursor: "pointer",
+              fontFamily: "var(--font-body)", fontSize: 11,
+              color: isPinned ? "#4ADE80" : "#8A8A85",
+              transition: "all 0.15s", display: "flex", alignItems: "center", gap: 5,
+            }}
+          >
+            {isPinned ? "⊞ Pinned" : "⊞ Board"}
+          </button>
+
+          <button
+            onClick={() => onExport(result.moment_id, result.brand, result.timestamp_start)}
             title="Export as JSON"
             style={{
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 4,
-              padding: "5px 10px",
-              cursor: "pointer",
-              fontFamily: "var(--font-body)",
-              fontSize: 11,
-              color: "#8A8A85",
-              transition: "all 0.15s",
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
+              borderRadius: 4, padding: "5px 10px", cursor: "pointer",
+              fontFamily: "var(--font-body)", fontSize: 11, color: "#8A8A85",
+              transition: "all 0.15s", display: "flex", alignItems: "center", gap: 5,
             }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.color = "#F5F5F0")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.color = "#8A8A85")
-            }
+            onMouseEnter={(e) => (e.currentTarget.style.color = "#F5F5F0")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#8A8A85")}
           >
             ↓ Export
           </button>
@@ -558,6 +557,178 @@ function VideoModal({
 }
 
 // ─────────────────────────────────────────
+// MOOD BOARD PANEL
+// ─────────────────────────────────────────
+
+function MoodBoardPanel({
+  items,
+  onRemove,
+  onClose,
+  onExportBoard,
+}: {
+  items: SearchResult[];
+  onRemove: (id: string) => void;
+  onClose: () => void;
+  onExportBoard: () => void;
+}) {
+  return (
+    <div style={{
+      position: "fixed", top: 0, right: 0, width: 420, height: "100vh",
+      background: "#0D0D0D", borderLeft: "1px solid rgba(255,255,255,0.06)",
+      zIndex: 110, display: "flex", flexDirection: "column",
+      animation: "slideIn 0.2s ease",
+    }}>
+      <div style={{
+        padding: "20px 20px 14px",
+        borderBottom: "1px solid rgba(255,255,255,0.06)",
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+      }}>
+        <span style={{ fontFamily: "var(--font-display)", fontSize: 15, color: "#F5F5F0", letterSpacing: "0.08em" }}>
+          Mood Board ({items.length})
+        </span>
+        <div style={{ display: "flex", gap: 8 }}>
+          {items.length > 0 && (
+            <button
+              onClick={onExportBoard}
+              style={{
+                background: "rgba(237,232,220,0.08)", border: "1px solid rgba(237,232,220,0.2)",
+                borderRadius: 4, padding: "4px 10px", cursor: "pointer",
+                fontFamily: "var(--font-body)", fontSize: 10, color: "#EDE8DC", letterSpacing: "0.08em",
+              }}
+            >
+              ↓ Export
+            </button>
+          )}
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#8A8A85", cursor: "pointer", fontSize: 18 }}>×</button>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+        {items.length === 0 ? (
+          <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "#8A8A85", textAlign: "center", marginTop: 40 }}>
+            Pin looks with ⊞ Board to build your mood board.
+          </p>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {items.map((item) => (
+              <div key={item.moment_id} style={{ position: "relative", borderRadius: 6, overflow: "hidden", aspectRatio: "3/4", background: "#141414" }}>
+                {item.thumbnail_url && (
+                  <img src={item.thumbnail_url} alt={item.description} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                )}
+                <div style={{
+                  position: "absolute", bottom: 0, left: 0, right: 0,
+                  background: "linear-gradient(transparent, rgba(0,0,0,0.85))",
+                  padding: "20px 8px 8px",
+                }}>
+                  <div style={{ fontFamily: "var(--font-body)", fontSize: 9, letterSpacing: "0.1em", color: "#EDE8DC", textTransform: "uppercase" }}>
+                    {item.brand} · {item.season}
+                  </div>
+                </div>
+                <button
+                  onClick={() => onRemove(item.moment_id)}
+                  style={{
+                    position: "absolute", top: 5, right: 5,
+                    background: "rgba(0,0,0,0.6)", border: "none",
+                    borderRadius: "50%", width: 20, height: 20,
+                    cursor: "pointer", color: "#8A8A85", fontSize: 12,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────
+// SHOW BRIEF MODAL
+// ─────────────────────────────────────────
+
+interface ShowItem {
+  id: string;
+  brand: string;
+  season: string;
+  year: number;
+  moment_count: number;
+  status: string;
+  summary?: string;
+}
+
+function ShowBriefModal({ show, onClose }: { show: ShowItem; onClose: () => void }) {
+  const [brief, setBrief] = useState<string | null>(show.summary || null);
+  const [loading, setLoading] = useState(!show.summary);
+  const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  useEffect(() => {
+    if (show.summary) return;
+    setLoading(true);
+    fetch(`${API}/api/shows/${show.id}/brief`)
+      .then((r) => r.json())
+      .then((d) => { setBrief(d.brief); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [show.id]);
+
+  const lines = brief ? brief.split("\n").filter(Boolean) : [];
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+      zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center",
+      padding: 32,
+    }} onClick={onClose}>
+      <div style={{
+        background: "#111", border: "1px solid rgba(255,255,255,0.1)",
+        borderRadius: 10, padding: 32, maxWidth: 560, width: "100%",
+        maxHeight: "80vh", overflowY: "auto",
+      }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 300, color: "#F5F5F0", letterSpacing: "0.08em" }}>
+              {show.brand}
+            </div>
+            <div style={{ fontFamily: "var(--font-body)", fontSize: 11, color: "#8A8A85", letterSpacing: "0.1em", marginTop: 2 }}>
+              {show.season} · {show.moment_count} looks
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#8A8A85", cursor: "pointer", fontSize: 20 }}>×</button>
+        </div>
+
+        {loading ? (
+          <div style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "#8A8A85", padding: "20px 0" }}>
+            Generating brief…
+          </div>
+        ) : brief ? (
+          <div style={{ fontFamily: "var(--font-body)", fontSize: 13, lineHeight: 1.8, color: "#C8C8C0" }}>
+            {lines.map((line, i) => {
+              if (line.startsWith("**") && line.includes("**")) {
+                const parts = line.split("**").filter(Boolean);
+                return (
+                  <div key={i} style={{ marginBottom: 12 }}>
+                    <span style={{ color: "#EDE8DC", fontWeight: 500 }}>{parts[0]}</span>
+                    {parts[1] && <span>{parts[1]}</span>}
+                  </div>
+                );
+              }
+              if (line.startsWith("- ")) {
+                return <div key={i} style={{ paddingLeft: 12, marginBottom: 4, color: "#A0A09A" }}>· {line.slice(2)}</div>;
+              }
+              return <div key={i} style={{ marginBottom: 8 }}>{line}</div>;
+            })}
+          </div>
+        ) : (
+          <div style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "#8A8A85" }}>Could not generate brief.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────
 // BOOKMARK PANEL
 // ─────────────────────────────────────────
 
@@ -708,27 +879,37 @@ export default function Home() {
   const [processingTime, setProcessingTime] = useState<number | null>(null);
   const [bookmarks, setBookmarks] = useState<Map<string, SearchResult>>(new Map());
   const [showBookmarks, setShowBookmarks] = useState(false);
+  const [moodBoard, setMoodBoard] = useState<Map<string, SearchResult>>(new Map());
+  const [showMoodBoard, setShowMoodBoard] = useState(false);
+  const [shows, setShows] = useState<ShowItem[]>([]);
+  const [activeBrief, setActiveBrief] = useState<ShowItem | null>(null);
   const [playingMoment, setPlayingMoment] = useState<{ id: string; brand: string; season: string } | null>(null);
   const debounceRef = useRef<NodeJS.Timeout>();
 
-  // Load bookmarks from localStorage on mount
+  // Load bookmarks + mood board from localStorage on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem("fa_bookmarks");
-      if (saved) {
-        const parsed: SearchResult[] = JSON.parse(saved);
-        setBookmarks(new Map(parsed.map((r) => [r.moment_id, r])));
-      }
+      if (saved) setBookmarks(new Map((JSON.parse(saved) as SearchResult[]).map((r) => [r.moment_id, r])));
+      const board = localStorage.getItem("fa_moodboard");
+      if (board) setMoodBoard(new Map((JSON.parse(board) as SearchResult[]).map((r) => [r.moment_id, r])));
     } catch {}
   }, []);
 
-  // Persist bookmarks to localStorage
+  // Persist bookmarks
   useEffect(() => {
-    localStorage.setItem(
-      "fa_bookmarks",
-      JSON.stringify(Array.from(bookmarks.values()))
-    );
+    localStorage.setItem("fa_bookmarks", JSON.stringify(Array.from(bookmarks.values())));
   }, [bookmarks]);
+
+  // Persist mood board
+  useEffect(() => {
+    localStorage.setItem("fa_moodboard", JSON.stringify(Array.from(moodBoard.values())));
+  }, [moodBoard]);
+
+  // Load shows for brief browsing
+  useEffect(() => {
+    fetch(`${API_URL}/api/shows`).then((r) => r.json()).then((d) => setShows(d.shows || [])).catch(() => {});
+  }, []);
 
   const runSearch = useCallback(async (q: string) => {
     if (!q.trim()) {
@@ -773,6 +954,33 @@ export default function Home() {
       }
       return next;
     });
+  };
+
+  const handlePin = (result: SearchResult) => {
+    setMoodBoard((prev) => {
+      const next = new Map(prev);
+      if (next.has(result.moment_id)) next.delete(result.moment_id);
+      else next.set(result.moment_id, result);
+      return next;
+    });
+  };
+
+  const handleExportBoard = async () => {
+    const items = Array.from(moodBoard.values());
+    if (!items.length) return;
+    const res = await fetch(`${API_URL}/api/moodboard/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ moment_ids: items.map((i) => i.moment_id), title: "Mood Board" }),
+    });
+    const data = await res.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fa-moodboard-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleExport = async (
@@ -839,24 +1047,36 @@ export default function Home() {
           FASHION ARCHIVE
         </span>
 
-        {/* Bookmark toggle */}
-        <button
-          onClick={() => setShowBookmarks((v) => !v)}
-          style={{
-            background: "none",
-            border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 4,
-            padding: "4px 12px",
-            cursor: "pointer",
-            fontFamily: "var(--font-body)",
-            fontSize: 11,
-            color: bookmarkList.length > 0 ? "#EDE8DC" : "#8A8A85",
-            letterSpacing: "0.1em",
-            transition: "all 0.15s",
-          }}
-        >
-          ✦ Saved {bookmarkList.length > 0 ? `(${bookmarkList.length})` : ""}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {/* Mood board toggle */}
+          <button
+            onClick={() => { setShowMoodBoard((v) => !v); setShowBookmarks(false); }}
+            style={{
+              background: moodBoard.size > 0 ? "rgba(74,222,128,0.08)" : "none",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 4, padding: "4px 12px", cursor: "pointer",
+              fontFamily: "var(--font-body)", fontSize: 11,
+              color: moodBoard.size > 0 ? "#4ADE80" : "#8A8A85",
+              letterSpacing: "0.1em", transition: "all 0.15s",
+            }}
+          >
+            ⊞ Board {moodBoard.size > 0 ? `(${moodBoard.size})` : ""}
+          </button>
+
+          {/* Bookmark toggle */}
+          <button
+            onClick={() => { setShowBookmarks((v) => !v); setShowMoodBoard(false); }}
+            style={{
+              background: "none", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 4, padding: "4px 12px", cursor: "pointer",
+              fontFamily: "var(--font-body)", fontSize: 11,
+              color: bookmarkList.length > 0 ? "#EDE8DC" : "#8A8A85",
+              letterSpacing: "0.1em", transition: "all 0.15s",
+            }}
+          >
+            ✦ Saved {bookmarkList.length > 0 ? `(${bookmarkList.length})` : ""}
+          </button>
+        </div>
       </div>
 
       {/* Main content */}
@@ -1042,7 +1262,9 @@ export default function Home() {
                 key={r.moment_id}
                 result={r}
                 bookmarks={new Set(bookmarks.keys())}
+                pinned={new Set(moodBoard.keys())}
                 onBookmark={handleBookmark}
+                onPin={handlePin}
                 onExport={handleExport}
                 onPlay={(id) => setPlayingMoment({ id, brand: r.brand, season: r.season })}
               />
@@ -1052,35 +1274,60 @@ export default function Home() {
 
         {/* Empty state */}
         {hasSearched && !loading && results.length === 0 && (
-          <div
-            style={{
-              textAlign: "center",
-              padding: "60px 32px",
-              fontFamily: "var(--font-display)",
-              fontSize: 18,
-              color: "#8A8A85",
-              fontWeight: 300,
-            }}
-          >
+          <div style={{ textAlign: "center", padding: "60px 32px", fontFamily: "var(--font-display)", fontSize: 18, color: "#8A8A85", fontWeight: 300 }}>
             No results for "{query}"
           </div>
         )}
+
+        {/* Shows grid — visible when no search active */}
+        {!hasSearched && shows.length > 0 && (
+          <div style={{ padding: "0 32px 64px", maxWidth: 960, margin: "0 auto", width: "100%" }}>
+            <div style={{ fontFamily: "var(--font-body)", fontSize: 10, letterSpacing: "0.14em", color: "#8A8A85", textTransform: "uppercase", marginBottom: 16, textAlign: "center" }}>
+              Browse shows — click for brief
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
+              {shows.filter((s) => s.status === "ready").map((show) => (
+                <button
+                  key={show.id}
+                  onClick={() => setActiveBrief(show)}
+                  style={{
+                    background: "#141414", border: "1px solid rgba(255,255,255,0.06)",
+                    borderRadius: 6, padding: "12px 14px", cursor: "pointer",
+                    textAlign: "left", transition: "border-color 0.15s",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.14)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}
+                >
+                  <div style={{ fontFamily: "var(--font-body)", fontSize: 11, color: "#EDE8DC", letterSpacing: "0.06em", marginBottom: 3 }}>{show.brand}</div>
+                  <div style={{ fontFamily: "var(--font-body)", fontSize: 10, color: "#8A8A85", letterSpacing: "0.05em" }}>{show.season} · {show.moment_count} looks</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
+
+      {/* Mood board panel */}
+      {showMoodBoard && (
+        <MoodBoardPanel
+          items={Array.from(moodBoard.values())}
+          onRemove={(id) => setMoodBoard((prev) => { const next = new Map(prev); next.delete(id); return next; })}
+          onClose={() => setShowMoodBoard(false)}
+          onExportBoard={handleExportBoard}
+        />
+      )}
 
       {/* Bookmark panel */}
       {showBookmarks && (
         <BookmarkPanel
           bookmarks={bookmarkList}
-          onRemove={(id) => {
-            setBookmarks((prev) => {
-              const next = new Map(prev);
-              next.delete(id);
-              return next;
-            });
-          }}
+          onRemove={(id) => { setBookmarks((prev) => { const next = new Map(prev); next.delete(id); return next; }); }}
           onClose={() => setShowBookmarks(false)}
         />
       )}
+
+      {/* Show brief modal */}
+      {activeBrief && <ShowBriefModal show={activeBrief} onClose={() => setActiveBrief(null)} />}
 
       {/* Video modal */}
       {playingMoment && (

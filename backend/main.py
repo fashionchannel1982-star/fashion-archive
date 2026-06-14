@@ -239,6 +239,117 @@ async def export_moment(req: ExportRequest):
 
 
 # ─────────────────────────────────────────
+# SHOW BRIEF
+# ─────────────────────────────────────────
+
+@app.get("/api/shows/{show_id}/brief")
+async def get_show_brief(show_id: str, regenerate: bool = False):
+    """
+    Returns (and caches) a Claude-generated creative brief for a show.
+    Brief covers: colour story, dominant silhouettes, key pieces, trend signals, season narrative.
+    Pass ?regenerate=true to force a fresh generation.
+    """
+    from services.database import AsyncSessionLocal, Show, Moment
+    from sqlalchemy import select, update
+
+    async with AsyncSessionLocal() as session:
+        show = (await session.execute(select(Show).where(Show.id == show_id))).scalar_one_or_none()
+        if not show:
+            raise HTTPException(status_code=404, detail="Show not found")
+
+        if show.summary and not regenerate:
+            return {"show_id": show_id, "brand": show.brand, "season": show.season, "brief": show.summary}
+
+        moments = (await session.execute(
+            select(Moment).where(Moment.show_id == show_id).where(Moment.description.isnot(None))
+        )).scalars().all()
+
+    if not moments:
+        raise HTTPException(status_code=404, detail="No moments available for brief generation")
+
+    descriptions = [m.description for m in moments if m.description and len(m.description) > 20]
+    if not descriptions:
+        raise HTTPException(status_code=404, detail="No valid descriptions found")
+
+    sample = descriptions[:60]
+    descriptions_block = "\n".join(f"- {d}" for d in sample)
+
+    import anthropic
+    client = anthropic.AsyncAnthropic()
+    prompt = f"""You are a fashion intelligence system. Below are moment descriptions from {show.brand} {show.season}.
+
+Descriptions:
+{descriptions_block}
+
+Write a concise show brief in exactly this structure (use these headings, keep each section tight):
+
+**Colour story** — 1–2 sentences on dominant palette and mood.
+**Silhouettes** — 1–2 sentences on recurring shapes, proportions, volume.
+**Key pieces** — 3–5 bullet points, each naming one standout garment type with its defining detail.
+**Trend signals** — 2–3 bullets on what this show signals for the season.
+**Season narrative** — One sentence capturing the creative thesis of the show.
+
+Be precise and editorial. Do not mention the brand name or designer. Under 200 words total."""
+
+    msg = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=400,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    brief = msg.content[0].text.strip()
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(update(Show).where(Show.id == show_id).values(summary=brief))
+        await session.commit()
+
+    return {"show_id": show_id, "brand": show.brand, "season": show.season, "brief": brief}
+
+
+# ─────────────────────────────────────────
+# MOOD BOARD EXPORT
+# ─────────────────────────────────────────
+
+class MoodBoardExportRequest(BaseModel):
+    moment_ids: list
+    title: str = "Mood Board"
+
+@app.post("/api/moodboard/export")
+async def export_moodboard(req: MoodBoardExportRequest):
+    """Returns full metadata for a list of moment IDs for mood board export."""
+    from services.database import AsyncSessionLocal, Moment, Show
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(
+            select(Moment, Show)
+            .join(Show, Show.id == Moment.show_id)
+            .where(Moment.id.in_(req.moment_ids))
+        )).all()
+
+    items = []
+    for moment, show in rows:
+        enriched = moment.enriched_data or {}
+        items.append({
+            "moment_id": str(moment.id),
+            "brand": show.brand,
+            "season": show.season,
+            "year": show.year,
+            "timestamp_start": moment.timestamp_start,
+            "description": enriched.get("description") or moment.description,
+            "thumbnail_url": moment.thumbnail_url,
+            "confidence": None,
+        })
+
+    return {
+        "export_version": "1.0",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "title": req.title,
+        "source": "Fashion Archive — Internal MVP",
+        "items": items,
+    }
+
+
+# ─────────────────────────────────────────
 # TIMELINE — TREND VELOCITY
 # ─────────────────────────────────────────
 
