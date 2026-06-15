@@ -1,11 +1,41 @@
 /**
  * Fashion Archive — Search Page
  * Apple TV aesthetic × Google search simplicity
- * v2: confidence scores + bookmark + export
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import Hls from "hls.js";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+// ─────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────
+
+const HERO_QUERY = "Dior tailoring";
+
+const CURATED_QUERIES = [
+  "sheer black eveningwear",
+  "Dior tailoring",
+  "couture gown",
+  "black turtleneck",
+  "print dress floral",
+];
+
+// ─────────────────────────────────────────
+// INSTRUMENTATION
+// ─────────────────────────────────────────
+
+const log = (event: string, data: Record<string, unknown>) => {
+  const entry = { ts: new Date().toISOString(), event, ...data };
+  console.log("[FA]", JSON.stringify(entry));
+  try {
+    const existing = JSON.parse(localStorage.getItem("fa_events") || "[]");
+    existing.push(entry);
+    if (existing.length > 500) existing.splice(0, existing.length - 500);
+    localStorage.setItem("fa_events", JSON.stringify(existing));
+  } catch {}
+};
 
 // ─────────────────────────────────────────
 // TYPES
@@ -23,6 +53,14 @@ interface SearchResult {
   thumbnail_url?: string;
   confidence: number;
   score_raw: number;
+  creative_director?: string | null;
+  show_date?: string | null;
+  source?: string | null;
+  enriched?: {
+    garments?: string[];
+    colours?: string[];
+    silhouette?: string;
+  } | null;
 }
 
 interface SearchResponse {
@@ -32,12 +70,20 @@ interface SearchResponse {
   processing_time_ms: number;
 }
 
+interface ShowItem {
+  id: string;
+  brand: string;
+  season: string;
+  year: number;
+  moment_count: number;
+  status: string;
+  summary?: string;
+}
+
 // ─────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────
 
-// confidence from backend = round(similarity * 100), range ~6–14.
-// Display on 0–10 scale: normalize to observed max of 14.
 function confidenceDisplay(c: number): string {
   return Math.min(10, Math.round((c / 14) * 10)).toString();
 }
@@ -60,6 +106,213 @@ function formatTimestamp(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function formatShowDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+function formatSource(source: string | null | undefined): string {
+  if (!source) return "";
+  if (source === "fc_master") return "FC Master";
+  if (source === "youtube_mvp") return "YouTube";
+  return source;
+}
+
+// ─────────────────────────────────────────
+// HLS LOAD (shared logic)
+// ─────────────────────────────────────────
+
+async function loadHls(
+  momentId: string,
+  video: HTMLVideoElement,
+  opts: { muted?: boolean; onError?: (e: string) => void } = {}
+): Promise<(() => void) | null> {
+  const res = await fetch(`${API_URL}/api/moments/${momentId}/play`);
+  if (!res.ok) throw new Error(`${res.status}`);
+  const data = await res.json();
+
+  const MAX = 120;
+  const clipStart = data.timestamp_start;
+  const clipEnd = Math.min(
+    data.timestamp_end > clipStart ? data.timestamp_end : clipStart + MAX,
+    clipStart + MAX
+  );
+
+  video.muted = opts.muted ?? false;
+
+  const onTimeUpdate = () => {
+    if (video.currentTime >= clipEnd) {
+      video.currentTime = clipStart;
+    }
+  };
+  video.addEventListener("timeupdate", onTimeUpdate);
+
+  let hls: Hls | null = null;
+
+  if (Hls.isSupported()) {
+    hls = new Hls({ startPosition: clipStart });
+    hls.loadSource(data.hls_url);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      video.currentTime = clipStart;
+      video.play().catch(() => {});
+    });
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = data.hls_url;
+    video.currentTime = clipStart;
+    video.play().catch(() => {});
+  } else {
+    opts.onError?.("HLS not supported");
+  }
+
+  return () => {
+    video.removeEventListener("timeupdate", onTimeUpdate);
+    hls?.destroy();
+  };
+}
+
+// ─────────────────────────────────────────
+// HERO MOMENT
+// ─────────────────────────────────────────
+
+function HeroMoment({
+  result,
+  onPlay,
+}: {
+  result: SearchResult;
+  onPlay: (r: SearchResult) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [fallback, setFallback] = useState(false);
+  const cleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    let cancelled = false;
+
+    loadHls(result.moment_id, video, { muted: true, onError: () => setFallback(true) })
+      .then((cleanup) => {
+        if (!cancelled) {
+          cleanupRef.current = cleanup;
+          setLoaded(true);
+          log("hero_play", { moment_id: result.moment_id, brand: result.brand });
+        }
+      })
+      .catch(() => { if (!cancelled) setFallback(true); });
+
+    return () => {
+      cancelled = true;
+      cleanupRef.current?.();
+    };
+  }, [result.moment_id]);
+
+  return (
+    <div
+      onClick={() => { onPlay(result); log("hero_click", { moment_id: result.moment_id }); }}
+      style={{
+        position: "relative",
+        width: "100%",
+        maxWidth: 960,
+        margin: "0 auto 40px",
+        borderRadius: 10,
+        overflow: "hidden",
+        cursor: "pointer",
+        aspectRatio: "16/9",
+        background: "#0D0D0D",
+        border: "1px solid rgba(255,255,255,0.07)",
+      }}
+    >
+      {/* Video or thumbnail */}
+      {!fallback ? (
+        <video
+          ref={videoRef}
+          muted
+          autoPlay
+          loop
+          playsInline
+          style={{
+            width: "100%", height: "100%", objectFit: "cover", display: "block",
+            opacity: loaded ? 1 : 0, transition: "opacity 0.6s ease",
+          }}
+        />
+      ) : null}
+
+      {/* Thumbnail fallback (always rendered behind video) */}
+      {result.thumbnail_url && (
+        <img
+          src={result.thumbnail_url}
+          alt={result.description}
+          style={{
+            position: "absolute", inset: 0,
+            width: "100%", height: "100%", objectFit: "cover",
+            opacity: loaded && !fallback ? 0 : 1,
+            transition: "opacity 0.6s ease",
+          }}
+        />
+      )}
+
+      {/* Gradient overlay */}
+      <div style={{
+        position: "absolute", inset: 0,
+        background: "linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.1) 50%, transparent 100%)",
+      }} />
+
+      {/* Play affordance */}
+      <div style={{
+        position: "absolute", inset: 0,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        opacity: 0, transition: "opacity 0.2s",
+      }}
+        className="hero-play-overlay"
+      >
+        <div style={{
+          width: 56, height: 56, borderRadius: "50%",
+          background: "rgba(255,255,255,0.18)", backdropFilter: "blur(8px)",
+          border: "1px solid rgba(255,255,255,0.25)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 18, color: "#F5F5F0", paddingLeft: 4,
+        }}>▶</div>
+      </div>
+
+      {/* Provenance overlay */}
+      <div style={{
+        position: "absolute", bottom: 0, left: 0, right: 0,
+        padding: "24px 28px 22px",
+      }}>
+        <div style={{
+          fontFamily: "var(--font-display)",
+          fontSize: 22, fontWeight: 300,
+          color: "#F5F5F0", letterSpacing: "0.1em",
+          marginBottom: 6,
+          textShadow: "0 1px 8px rgba(0,0,0,0.6)",
+        }}>
+          {result.brand.toUpperCase()} · {result.season}
+        </div>
+        <div style={{
+          fontFamily: "var(--font-body)", fontSize: 12, color: "rgba(245,245,240,0.75)",
+          lineHeight: 1.5, maxWidth: 600,
+          textShadow: "0 1px 6px rgba(0,0,0,0.6)",
+        }}>
+          {result.description}
+        </div>
+        <div style={{
+          marginTop: 8,
+          fontFamily: "var(--font-body)", fontSize: 10, color: "rgba(200,200,195,0.6)",
+          letterSpacing: "0.08em",
+        }}>
+          Click to play
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────
 // RESULT CARD
 // ─────────────────────────────────────────
@@ -68,6 +321,7 @@ function ResultCard({
   result,
   bookmarks,
   pinned,
+  highlighted,
   onBookmark,
   onPin,
   onExport,
@@ -76,6 +330,7 @@ function ResultCard({
   result: SearchResult;
   bookmarks: Set<string>;
   pinned: Set<string>;
+  highlighted: boolean;
   onBookmark: (r: SearchResult) => void;
   onPin: (r: SearchResult) => void;
   onExport: (momentId: string, brand: string, ts: number) => void;
@@ -84,31 +339,35 @@ function ResultCard({
   const isBookmarked = bookmarks.has(result.moment_id);
   const isPinned = pinned.has(result.moment_id);
 
+  // Build provenance line parts
+  const provParts: Array<{ text: string; color?: string }> = [];
+  if (result.brand) provParts.push({ text: result.brand });
+  if (result.season) provParts.push({ text: result.season });
+  const dateStr = formatShowDate(result.show_date);
+  if (dateStr) provParts.push({ text: dateStr });
+  if (result.creative_director) provParts.push({ text: result.creative_director, color: "#C8A97A" });
+  const sourceStr = formatSource(result.source);
+  if (sourceStr) provParts.push({ text: sourceStr });
+
   return (
     <div
       style={{
-        background: "#141414",
+        background: highlighted ? "rgba(237,232,220,0.04)" : "#141414",
         borderRadius: 8,
         overflow: "hidden",
         transition: "transform 0.2s ease, background 0.2s ease",
+        border: highlighted ? "1px solid rgba(237,232,220,0.12)" : "1px solid transparent",
         cursor: "default",
       }}
-      onMouseEnter={(e) =>
-        (e.currentTarget.style.background = "#1C1C1C")
-      }
-      onMouseLeave={(e) =>
-        (e.currentTarget.style.background = "#141414")
-      }
+      onMouseEnter={(e) => (e.currentTarget.style.background = "#1C1C1C")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = highlighted ? "rgba(237,232,220,0.04)" : "#141414")}
     >
-      {/* Thumbnail — click to play */}
+      {/* Thumbnail */}
       <div
-        onClick={() => onPlay(result.moment_id)}
+        onClick={() => { onPlay(result.moment_id); log("result_click", { moment_id: result.moment_id, brand: result.brand, query: result.description.slice(0, 30) }); }}
         style={{
-          aspectRatio: "16/9",
-          background: "#0F0F0F",
-          position: "relative",
-          overflow: "hidden",
-          cursor: "pointer",
+          aspectRatio: "16/9", background: "#0F0F0F",
+          position: "relative", overflow: "hidden", cursor: "pointer",
         }}
       >
         {result.thumbnail_url ? (
@@ -118,68 +377,36 @@ function ResultCard({
               alt={result.description}
               style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
             />
-            {/* Play overlay — shown on hover of the outer div */}
             <div style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              position: "absolute", inset: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
             }}>
               <div style={{
-                width: 44,
-                height: 44,
-                borderRadius: "50%",
-                background: "rgba(255,255,255,0.15)",
-                backdropFilter: "blur(6px)",
+                width: 44, height: 44, borderRadius: "50%",
+                background: "rgba(255,255,255,0.15)", backdropFilter: "blur(6px)",
                 border: "1px solid rgba(255,255,255,0.2)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 15,
-                color: "#F5F5F0",
-                paddingLeft: 3,
-                opacity: 0,
-                transition: "opacity 0.18s",
-              }}
-                className="play-btn"
-              >▶</div>
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 15, color: "#F5F5F0", paddingLeft: 3,
+                opacity: 0, transition: "opacity 0.18s",
+              }} className="play-btn">▶</div>
             </div>
           </>
         ) : (
-          <div
-            style={{
-              width: "100%",
-              height: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#2A2A2A",
-              fontFamily: "var(--font-display)",
-              fontSize: 13,
-              letterSpacing: "0.2em",
-            }}
-          >
+          <div style={{
+            width: "100%", height: "100%",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#2A2A2A", fontFamily: "var(--font-display)", fontSize: 13, letterSpacing: "0.2em",
+          }}>
             {result.brand.toUpperCase()}
           </div>
         )}
-
         {/* Timestamp pill */}
-        <div
-          style={{
-            position: "absolute",
-            bottom: 8,
-            left: 8,
-            background: "rgba(0,0,0,0.75)",
-            backdropFilter: "blur(4px)",
-            borderRadius: 4,
-            padding: "2px 8px",
-            fontFamily: "var(--font-body)",
-            fontSize: 11,
-            color: "#F5F5F0",
-            letterSpacing: "0.05em",
-          }}
-        >
+        <div style={{
+          position: "absolute", bottom: 8, left: 8,
+          background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)",
+          borderRadius: 4, padding: "2px 8px",
+          fontFamily: "var(--font-body)", fontSize: 11, color: "#F5F5F0", letterSpacing: "0.05em",
+        }}>
           {formatTimestamp(result.timestamp_start)}
         </div>
       </div>
@@ -187,95 +414,64 @@ function ResultCard({
       {/* Body */}
       <div style={{ padding: "14px 16px 16px" }}>
         {/* Header row */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            marginBottom: 8,
-          }}
-        >
-          {/* Brand pill */}
-          <span
-            style={{
-              fontFamily: "var(--font-body)",
-              fontSize: 10,
-              fontWeight: 500,
-              letterSpacing: "0.15em",
-              color: "#EDE8DC",
-              background: "rgba(237,232,220,0.08)",
-              borderRadius: 3,
-              padding: "2px 7px",
-              textTransform: "uppercase",
-            }}
-          >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <span style={{
+            fontFamily: "var(--font-body)", fontSize: 10, fontWeight: 500,
+            letterSpacing: "0.15em", color: "#EDE8DC",
+            background: "rgba(237,232,220,0.08)", borderRadius: 3, padding: "2px 7px",
+            textTransform: "uppercase",
+          }}>
             {result.brand}
           </span>
-
-          {/* Season */}
-          <span
-            style={{
-              fontFamily: "var(--font-body)",
-              fontSize: 10,
-              color: "#8A8A85",
-              letterSpacing: "0.05em",
-            }}
-          >
+          <span style={{
+            fontFamily: "var(--font-body)", fontSize: 10, color: "#8A8A85", letterSpacing: "0.05em",
+          }}>
             {result.season}
           </span>
-
-          {/* Spacer */}
           <div style={{ flex: 1 }} />
-
-          {/* Confidence badge */}
-          <span
-            style={{
-              fontFamily: "var(--font-body)",
-              fontSize: 10,
-              fontWeight: 500,
-              color: confidenceColor(result.confidence),
-              letterSpacing: "0.05em",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: confidenceColor(result.confidence),
-                display: "inline-block",
-              }}
-            />
+          <span style={{
+            fontFamily: "var(--font-body)", fontSize: 10, fontWeight: 500,
+            color: confidenceColor(result.confidence), letterSpacing: "0.05em",
+            display: "flex", alignItems: "center", gap: 4,
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: confidenceColor(result.confidence), display: "inline-block",
+            }} />
             {confidenceDisplay(result.confidence)}/10 · {confidenceLabel(result.confidence)}
           </span>
         </div>
 
         {/* Description */}
-        <p
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 14,
-            fontWeight: 300,
-            color: "#F5F5F0",
-            lineHeight: 1.6,
-            margin: "0 0 12px",
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-        >
+        <p style={{
+          fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 300,
+          color: "#F5F5F0", lineHeight: 1.6, margin: "0 0 10px",
+          display: "-webkit-box", WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical", overflow: "hidden",
+        }}>
           {result.description}
         </p>
+
+        {/* Provenance line */}
+        {provParts.length > 0 && (
+          <div style={{
+            fontFamily: "var(--font-body)", fontSize: 10, color: "#8A8A85",
+            marginBottom: 12, letterSpacing: "0.04em",
+            display: "flex", flexWrap: "wrap", gap: 0, alignItems: "center",
+          }}>
+            {provParts.map((part, i) => (
+              <span key={i} style={{ color: part.color || "#8A8A85" }}>
+                {i > 0 && <span style={{ color: "#3A3A38", margin: "0 4px" }}>·</span>}
+                {part.text}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             onClick={() => onBookmark(result)}
-            title={isBookmarked ? "Remove bookmark" : "Save"}
             style={{
               background: isBookmarked ? "rgba(237,232,220,0.12)" : "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
@@ -290,7 +486,6 @@ function ResultCard({
 
           <button
             onClick={() => onPin(result)}
-            title={isPinned ? "Remove from board" : "Add to mood board"}
             style={{
               background: isPinned ? "rgba(74,222,128,0.12)" : "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
@@ -305,7 +500,6 @@ function ResultCard({
 
           <button
             onClick={() => onExport(result.moment_id, result.brand, result.timestamp_start)}
-            title="Export as JSON"
             style={{
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
@@ -328,7 +522,7 @@ function ResultCard({
 // VIDEO MODAL
 // ─────────────────────────────────────────
 
-const MAX_CLIP_DURATION = 120; // seconds — hard cap per clip
+const MAX_CLIP_DURATION = 120;
 
 function VideoModal({
   momentId,
@@ -344,11 +538,10 @@ function VideoModal({
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0); // 0–1
+  const [progress, setProgress] = useState(0);
   const [clipDuration, setClipDuration] = useState(0);
   const startRef = useRef(0);
   const endRef = useRef(0);
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   useEffect(() => {
     let cancelled = false;
@@ -361,7 +554,6 @@ function VideoModal({
         if (cancelled || !videoRef.current) return;
 
         const clipStart = data.timestamp_start;
-        // Cap: no longer than MAX_CLIP_DURATION, and no further than timestamp_end
         const clipEnd = Math.min(
           data.timestamp_end > clipStart ? data.timestamp_end : clipStart + MAX_CLIP_DURATION,
           clipStart + MAX_CLIP_DURATION
@@ -371,7 +563,6 @@ function VideoModal({
         setClipDuration(clipEnd - clipStart);
 
         const video = videoRef.current;
-
         const onTimeUpdate = () => {
           if (video.currentTime >= endRef.current) {
             video.pause();
@@ -406,7 +597,6 @@ function VideoModal({
     }
 
     load();
-
     return () => {
       cancelled = true;
       hlsRef.current?.destroy();
@@ -427,125 +617,51 @@ function VideoModal({
     <div
       onClick={onClose}
       style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.88)",
-        backdropFilter: "blur(8px)",
-        zIndex: 200,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.88)", backdropFilter: "blur(8px)",
+        zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
       }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: "100%",
-          maxWidth: 960,
-          background: "#111",
-          borderRadius: 10,
-          overflow: "hidden",
+          width: "100%", maxWidth: 960,
+          background: "#111", borderRadius: 10, overflow: "hidden",
           border: "1px solid rgba(255,255,255,0.08)",
         }}
       >
-        {/* Header */}
         <div style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "14px 20px",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 14,
-              letterSpacing: "0.12em",
-              color: "#EDE8DC",
-            }}>
+            <span style={{ fontFamily: "var(--font-display)", fontSize: 14, letterSpacing: "0.12em", color: "#EDE8DC" }}>
               {brand.toUpperCase()} · {season}
             </span>
             {clipDuration > 0 && (
-              <span style={{
-                fontFamily: "var(--font-body)",
-                fontSize: 11,
-                color: "#8A8A85",
-                letterSpacing: "0.05em",
-              }}>
+              <span style={{ fontFamily: "var(--font-body)", fontSize: 11, color: "#8A8A85", letterSpacing: "0.05em" }}>
                 {formatTimestamp(startRef.current)} — {formatTimestamp(endRef.current)}
-                {clipDuration >= MAX_CLIP_DURATION && (
-                  <span style={{ color: "#555", marginLeft: 6 }}>· clipped to 2 min</span>
-                )}
+                {clipDuration >= MAX_CLIP_DURATION && <span style={{ color: "#555", marginLeft: 6 }}>· clipped to 2 min</span>}
               </span>
             )}
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: "none",
-              border: "none",
-              color: "#8A8A85",
-              cursor: "pointer",
-              fontSize: 20,
-              lineHeight: 1,
-              padding: "0 4px",
-            }}
-          >
-            ×
-          </button>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#8A8A85", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "0 4px" }}>×</button>
         </div>
 
-        {/* Video */}
         <div style={{ position: "relative", aspectRatio: "16/9", background: "#000" }}>
           {error ? (
-            <div style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontFamily: "var(--font-body)",
-              fontSize: 13,
-              color: "#8A8A85",
-            }}>
-              {error}
-            </div>
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-body)", fontSize: 13, color: "#8A8A85" }}>{error}</div>
           ) : (
-            <video
-              ref={videoRef}
-              controls
-              style={{ width: "100%", height: "100%", display: "block" }}
-            />
+            <video ref={videoRef} controls style={{ width: "100%", height: "100%", display: "block" }} />
           )}
         </div>
 
-        {/* Clip progress bar */}
         {clipDuration > 0 && (
           <div style={{ padding: "10px 20px 14px", background: "#0D0D0D" }}>
-            <div style={{
-              height: 2,
-              background: "rgba(255,255,255,0.07)",
-              borderRadius: 1,
-              overflow: "hidden",
-            }}>
-              <div style={{
-                height: "100%",
-                width: `${progress * 100}%`,
-                background: "#EDE8DC",
-                borderRadius: 1,
-                transition: "width 0.2s linear",
-              }} />
+            <div style={{ height: 2, background: "rgba(255,255,255,0.07)", borderRadius: 1, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${progress * 100}%`, background: "#EDE8DC", borderRadius: 1, transition: "width 0.2s linear" }} />
             </div>
-            <div style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginTop: 6,
-              fontFamily: "var(--font-body)",
-              fontSize: 10,
-              color: "#555",
-              letterSpacing: "0.05em",
-            }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontFamily: "var(--font-body)", fontSize: 10, color: "#555", letterSpacing: "0.05em" }}>
               <span>+{elapsed}s</span>
               <span>−{remaining}s</span>
             </div>
@@ -560,12 +676,7 @@ function VideoModal({
 // MOOD BOARD PANEL
 // ─────────────────────────────────────────
 
-function MoodBoardPanel({
-  items,
-  onRemove,
-  onClose,
-  onExportBoard,
-}: {
+function MoodBoardPanel({ items, onRemove, onClose, onExportBoard }: {
   items: SearchResult[];
   onRemove: (id: string) => void;
   onClose: () => void;
@@ -579,8 +690,7 @@ function MoodBoardPanel({
       animation: "slideIn 0.2s ease",
     }}>
       <div style={{
-        padding: "20px 20px 14px",
-        borderBottom: "1px solid rgba(255,255,255,0.06)",
+        padding: "20px 20px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)",
         display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         <span style={{ fontFamily: "var(--font-display)", fontSize: 15, color: "#F5F5F0", letterSpacing: "0.08em" }}>
@@ -588,21 +698,15 @@ function MoodBoardPanel({
         </span>
         <div style={{ display: "flex", gap: 8 }}>
           {items.length > 0 && (
-            <button
-              onClick={onExportBoard}
-              style={{
-                background: "rgba(237,232,220,0.08)", border: "1px solid rgba(237,232,220,0.2)",
-                borderRadius: 4, padding: "4px 10px", cursor: "pointer",
-                fontFamily: "var(--font-body)", fontSize: 10, color: "#EDE8DC", letterSpacing: "0.08em",
-              }}
-            >
-              ↓ Export
-            </button>
+            <button onClick={onExportBoard} style={{
+              background: "rgba(237,232,220,0.08)", border: "1px solid rgba(237,232,220,0.2)",
+              borderRadius: 4, padding: "4px 10px", cursor: "pointer",
+              fontFamily: "var(--font-body)", fontSize: 10, color: "#EDE8DC", letterSpacing: "0.08em",
+            }}>↓ Export</button>
           )}
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#8A8A85", cursor: "pointer", fontSize: 18 }}>×</button>
         </div>
       </div>
-
       <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
         {items.length === 0 ? (
           <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "#8A8A85", textAlign: "center", marginTop: 40 }}>
@@ -612,9 +716,7 @@ function MoodBoardPanel({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {items.map((item) => (
               <div key={item.moment_id} style={{ position: "relative", borderRadius: 6, overflow: "hidden", aspectRatio: "3/4", background: "#141414" }}>
-                {item.thumbnail_url && (
-                  <img src={item.thumbnail_url} alt={item.description} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                )}
+                {item.thumbnail_url && <img src={item.thumbnail_url} alt={item.description} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
                 <div style={{
                   position: "absolute", bottom: 0, left: 0, right: 0,
                   background: "linear-gradient(transparent, rgba(0,0,0,0.85))",
@@ -624,16 +726,12 @@ function MoodBoardPanel({
                     {item.brand} · {item.season}
                   </div>
                 </div>
-                <button
-                  onClick={() => onRemove(item.moment_id)}
-                  style={{
-                    position: "absolute", top: 5, right: 5,
-                    background: "rgba(0,0,0,0.6)", border: "none",
-                    borderRadius: "50%", width: 20, height: 20,
-                    cursor: "pointer", color: "#8A8A85", fontSize: 12,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}
-                >×</button>
+                <button onClick={() => onRemove(item.moment_id)} style={{
+                  position: "absolute", top: 5, right: 5,
+                  background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%",
+                  width: 20, height: 20, cursor: "pointer", color: "#8A8A85", fontSize: 12,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>×</button>
               </div>
             ))}
           </div>
@@ -643,30 +741,18 @@ function MoodBoardPanel({
   );
 }
 
-
 // ─────────────────────────────────────────
 // SHOW BRIEF MODAL
 // ─────────────────────────────────────────
 
-interface ShowItem {
-  id: string;
-  brand: string;
-  season: string;
-  year: number;
-  moment_count: number;
-  status: string;
-  summary?: string;
-}
-
 function ShowBriefModal({ show, onClose }: { show: ShowItem; onClose: () => void }) {
   const [brief, setBrief] = useState<string | null>(show.summary || null);
   const [loading, setLoading] = useState(!show.summary);
-  const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   useEffect(() => {
     if (show.summary) return;
     setLoading(true);
-    fetch(`${API}/api/shows/${show.id}/brief`)
+    fetch(`${API_URL}/api/shows/${show.id}/brief`)
       .then((r) => r.json())
       .then((d) => { setBrief(d.brief); setLoading(false); })
       .catch(() => setLoading(false));
@@ -677,8 +763,7 @@ function ShowBriefModal({ show, onClose }: { show: ShowItem; onClose: () => void
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
-      zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center",
-      padding: 32,
+      zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 32,
     }} onClick={onClose}>
       <div style={{
         background: "#111", border: "1px solid rgba(255,255,255,0.1)",
@@ -687,20 +772,13 @@ function ShowBriefModal({ show, onClose }: { show: ShowItem; onClose: () => void
       }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
           <div>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 300, color: "#F5F5F0", letterSpacing: "0.08em" }}>
-              {show.brand}
-            </div>
-            <div style={{ fontFamily: "var(--font-body)", fontSize: 11, color: "#8A8A85", letterSpacing: "0.1em", marginTop: 2 }}>
-              {show.season} · {show.moment_count} looks
-            </div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 300, color: "#F5F5F0", letterSpacing: "0.08em" }}>{show.brand}</div>
+            <div style={{ fontFamily: "var(--font-body)", fontSize: 11, color: "#8A8A85", letterSpacing: "0.1em", marginTop: 2 }}>{show.season} · {show.moment_count} looks</div>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#8A8A85", cursor: "pointer", fontSize: 20 }}>×</button>
         </div>
-
         {loading ? (
-          <div style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "#8A8A85", padding: "20px 0" }}>
-            Generating brief…
-          </div>
+          <div style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "#8A8A85", padding: "20px 0" }}>Generating brief…</div>
         ) : brief ? (
           <div style={{ fontFamily: "var(--font-body)", fontSize: 13, lineHeight: 1.8, color: "#C8C8C0" }}>
             {lines.map((line, i) => {
@@ -727,135 +805,48 @@ function ShowBriefModal({ show, onClose }: { show: ShowItem; onClose: () => void
   );
 }
 
-
 // ─────────────────────────────────────────
 // BOOKMARK PANEL
 // ─────────────────────────────────────────
 
-function BookmarkPanel({
-  bookmarks,
-  onRemove,
-  onClose,
-}: {
+function BookmarkPanel({ bookmarks, onRemove, onClose }: {
   bookmarks: SearchResult[];
   onRemove: (id: string) => void;
   onClose: () => void;
 }) {
   return (
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        right: 0,
-        width: 320,
-        height: "100vh",
-        background: "#111",
-        borderLeft: "1px solid rgba(255,255,255,0.06)",
-        zIndex: 100,
-        display: "flex",
-        flexDirection: "column",
-        animation: "slideIn 0.2s ease",
-      }}
-    >
+    <div style={{
+      position: "fixed", top: 0, right: 0, width: 320, height: "100vh",
+      background: "#111", borderLeft: "1px solid rgba(255,255,255,0.06)",
+      zIndex: 100, display: "flex", flexDirection: "column",
+      animation: "slideIn 0.2s ease",
+    }}>
       <style>{`@keyframes slideIn { from { transform: translateX(100%) } to { transform: translateX(0) } }`}</style>
-
-      <div
-        style={{
-          padding: "24px 20px 16px",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 16,
-            color: "#F5F5F0",
-          }}
-        >
-          Saved ({bookmarks.length})
-        </span>
-        <button
-          onClick={onClose}
-          style={{
-            background: "none",
-            border: "none",
-            color: "#8A8A85",
-            cursor: "pointer",
-            fontSize: 18,
-          }}
-        >
-          ×
-        </button>
+      <div style={{
+        padding: "24px 20px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+      }}>
+        <span style={{ fontFamily: "var(--font-display)", fontSize: 16, color: "#F5F5F0" }}>Saved ({bookmarks.length})</span>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "#8A8A85", cursor: "pointer", fontSize: 18 }}>×</button>
       </div>
-
       <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
         {bookmarks.length === 0 ? (
-          <p
-            style={{
-              fontFamily: "var(--font-body)",
-              fontSize: 13,
-              color: "#8A8A85",
-              textAlign: "center",
-              marginTop: 40,
-            }}
-          >
-            Nothing saved yet.
-          </p>
+          <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "#8A8A85", textAlign: "center", marginTop: 40 }}>Nothing saved yet.</p>
         ) : (
           bookmarks.map((b) => (
-            <div
-              key={b.moment_id}
-              style={{
-                background: "#141414",
-                borderRadius: 6,
-                padding: "10px 12px",
-                marginBottom: 8,
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-              }}
-            >
+            <div key={b.moment_id} style={{
+              background: "#141414", borderRadius: 6, padding: "10px 12px", marginBottom: 8,
+              display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+            }}>
               <div>
-                <div
-                  style={{
-                    fontFamily: "var(--font-body)",
-                    fontSize: 10,
-                    letterSpacing: "0.12em",
-                    color: "#EDE8DC",
-                    textTransform: "uppercase",
-                    marginBottom: 4,
-                  }}
-                >
+                <div style={{ fontFamily: "var(--font-body)", fontSize: 10, letterSpacing: "0.12em", color: "#EDE8DC", textTransform: "uppercase", marginBottom: 4 }}>
                   {b.brand} · {formatTimestamp(b.timestamp_start)}
                 </div>
-                <div
-                  style={{
-                    fontFamily: "var(--font-display)",
-                    fontSize: 12,
-                    color: "#8A8A85",
-                    lineHeight: 1.5,
-                  }}
-                >
+                <div style={{ fontFamily: "var(--font-display)", fontSize: 12, color: "#8A8A85", lineHeight: 1.5 }}>
                   {b.description.slice(0, 60)}…
                 </div>
               </div>
-              <button
-                onClick={() => onRemove(b.moment_id)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "#555",
-                  cursor: "pointer",
-                  fontSize: 14,
-                  marginLeft: 8,
-                  flexShrink: 0,
-                }}
-              >
-                ×
-              </button>
+              <button onClick={() => onRemove(b.moment_id)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 14, marginLeft: 8, flexShrink: 0 }}>×</button>
             </div>
           ))
         )}
@@ -867,8 +858,6 @@ function BookmarkPanel({
 // ─────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export default function Home() {
   const [query, setQuery] = useState("");
@@ -884,9 +873,12 @@ export default function Home() {
   const [shows, setShows] = useState<ShowItem[]>([]);
   const [activeBrief, setActiveBrief] = useState<ShowItem | null>(null);
   const [playingMoment, setPlayingMoment] = useState<{ id: string; brand: string; season: string } | null>(null);
+  const [heroResult, setHeroResult] = useState<SearchResult | null>(null);
+  const [synthesis, setSynthesis] = useState<{ synthesis: string; grounded: boolean; cited_moment_ids: string[] } | null>(null);
+  const [synthesizing, setSynthesizing] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout>();
 
-  // Load bookmarks + mood board from localStorage on mount
+  // Load from localStorage on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem("fa_bookmarks");
@@ -896,29 +888,45 @@ export default function Home() {
     } catch {}
   }, []);
 
-  // Persist bookmarks
+  // Persist bookmarks + moodboard
   useEffect(() => {
     localStorage.setItem("fa_bookmarks", JSON.stringify(Array.from(bookmarks.values())));
   }, [bookmarks]);
-
-  // Persist mood board
   useEffect(() => {
     localStorage.setItem("fa_moodboard", JSON.stringify(Array.from(moodBoard.values())));
   }, [moodBoard]);
 
-  // Load shows for brief browsing
+  // Load shows
   useEffect(() => {
     fetch(`${API_URL}/api/shows`).then((r) => r.json()).then((d) => setShows(d.shows || [])).catch(() => {});
+  }, []);
+
+  // Hero moment on mount
+  useEffect(() => {
+    fetch(`${API_URL}/api/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: HERO_QUERY, limit: 1 }),
+    })
+      .then((r) => r.json())
+      .then((d: SearchResponse) => {
+        if (d.results.length > 0 && d.results[0].thumbnail_url) {
+          setHeroResult(d.results[0]);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const runSearch = useCallback(async (q: string) => {
     if (!q.trim()) {
       setResults([]);
       setWeakMatch(false);
+      setSynthesis(null);
       setHasSearched(false);
       return;
     }
     setLoading(true);
+    setSynthesis(null);
     try {
       const res = await fetch(`${API_URL}/api/search`, {
         method: "POST",
@@ -930,6 +938,25 @@ export default function Home() {
       setWeakMatch(data.results.length > 0 && data.results.every((r) => r.confidence < 12));
       setProcessingTime(data.processing_time_ms);
       setHasSearched(true);
+      log("search", { query: q, results: data.total, ms: data.processing_time_ms });
+
+      // Fire synthesis for ≥3 results — don't block the grid
+      if (data.results.length >= 3) {
+        setSynthesizing(true);
+        const topIds = data.results.slice(0, 8).map((r) => r.moment_id);
+        fetch(`${API_URL}/api/synthesize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: q, moment_ids: topIds }),
+        })
+          .then((r) => r.json())
+          .then((s) => {
+            setSynthesis(s);
+            setSynthesizing(false);
+            log("synthesis_impression", { query: q, grounded: s.grounded });
+          })
+          .catch(() => setSynthesizing(false));
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -944,14 +971,17 @@ export default function Home() {
     debounceRef.current = setTimeout(() => runSearch(val), 300);
   };
 
+  const handleChipClick = (chip: string) => {
+    setQuery(chip);
+    log("chip_click", { chip });
+    runSearch(chip);
+  };
+
   const handleBookmark = (result: SearchResult) => {
     setBookmarks((prev) => {
       const next = new Map(prev);
-      if (next.has(result.moment_id)) {
-        next.delete(result.moment_id);
-      } else {
-        next.set(result.moment_id, result);
-      }
+      if (next.has(result.moment_id)) next.delete(result.moment_id);
+      else next.set(result.moment_id, result);
       return next;
     });
   };
@@ -977,17 +1007,11 @@ export default function Home() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `fa-moodboard-${Date.now()}.json`;
-    a.click();
+    a.href = url; a.download = `fa-moodboard-${Date.now()}.json`; a.click();
     URL.revokeObjectURL(url);
   };
 
-  const handleExport = async (
-    momentId: string,
-    brand: string,
-    ts: number
-  ) => {
+  const handleExport = async (momentId: string, brand: string, ts: number) => {
     try {
       const res = await fetch(`${API_URL}/api/export`, {
         method: "POST",
@@ -995,14 +1019,10 @@ export default function Home() {
         body: JSON.stringify({ moment_id: momentId }),
       });
       const data = await res.json();
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
-        type: "application/json",
-      });
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = `fa-export-${brand.toLowerCase()}-${Math.floor(ts)}s.json`;
-      a.click();
+      a.href = url; a.download = `fa-export-${brand.toLowerCase()}-${Math.floor(ts)}s.json`; a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error("Export failed:", err);
@@ -1010,51 +1030,56 @@ export default function Home() {
   };
 
   const bookmarkList = Array.from(bookmarks.values());
+  const citedIds = new Set(synthesis?.cited_moment_ids || []);
 
   return (
     <>
+      <style>{`
+        @keyframes slideIn { from { transform: translateX(100%) } to { transform: translateX(0) } }
+        @keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        .hero-play-overlay { opacity: 0 !important; transition: opacity 0.2s; }
+        div:has(> .hero-play-overlay):hover .hero-play-overlay { opacity: 1 !important; }
+      `}</style>
 
       {/* Top bar */}
-      <div
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 52,
-          borderBottom: hasSearched
-            ? "1px solid rgba(255,255,255,0.05)"
-            : "none",
-          background: "rgba(10,10,10,0.9)",
-          backdropFilter: "blur(12px)",
-          zIndex: 50,
-          display: "flex",
-          alignItems: "center",
-          padding: "0 32px",
-          justifyContent: "space-between",
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 16,
-            letterSpacing: "0.12em",
-            color: "#EDE8DC",
-            opacity: hasSearched ? 1 : 0,
-            transition: "opacity 0.3s",
-          }}
-        >
+      <div style={{
+        position: "fixed", top: 0, left: 0, right: 0, height: 52,
+        borderBottom: hasSearched ? "1px solid rgba(255,255,255,0.05)" : "none",
+        background: "rgba(10,10,10,0.9)", backdropFilter: "blur(12px)",
+        zIndex: 50, display: "flex", alignItems: "center",
+        padding: "0 32px", justifyContent: "space-between",
+      }}>
+        <span style={{
+          fontFamily: "var(--font-display)", fontSize: 16,
+          letterSpacing: "0.12em", color: "#EDE8DC",
+          opacity: hasSearched ? 1 : 0, transition: "opacity 0.3s",
+        }}>
           FASHION ARCHIVE
         </span>
 
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Timeline link — always visible */}
+          <a href="/timeline" style={{
+            fontFamily: "var(--font-body)", fontSize: 11,
+            color: "#8A8A85", letterSpacing: "0.1em",
+            textDecoration: "none", padding: "4px 10px",
+            border: "1px solid rgba(255,255,255,0.07)", borderRadius: 4,
+            transition: "color 0.15s, border-color 0.15s",
+          }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#C8A97A"; (e.currentTarget as HTMLElement).style.borderColor = "#C8A97A"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#8A8A85"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.07)"; }}
+          >
+            Timeline
+          </a>
+
           {/* Mood board toggle */}
           <button
             onClick={() => { setShowMoodBoard((v) => !v); setShowBookmarks(false); }}
             style={{
               background: moodBoard.size > 0 ? "rgba(74,222,128,0.08)" : "none",
-              border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 4, padding: "4px 12px", cursor: "pointer",
+              border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4,
+              padding: "4px 12px", cursor: "pointer",
               fontFamily: "var(--font-body)", fontSize: 11,
               color: moodBoard.size > 0 ? "#4ADE80" : "#8A8A85",
               letterSpacing: "0.1em", transition: "all 0.15s",
@@ -1080,67 +1105,42 @@ export default function Home() {
       </div>
 
       {/* Main content */}
-      <main
-        style={{
-          minHeight: "100vh",
-          paddingTop: hasSearched ? 80 : 0,
-          transition: "padding-top 0.4s ease",
-        }}
-      >
-        {/* Hero / search */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: hasSearched ? "flex-start" : "center",
-            minHeight: hasSearched ? "auto" : "100vh",
-            padding: hasSearched ? "0 32px 24px" : "0 32px",
-            transition: "all 0.4s ease",
-          }}
-        >
-          {/* Wordmark — only on empty state */}
+      <main style={{
+        minHeight: "100vh",
+        paddingTop: hasSearched ? 80 : 0,
+        transition: "padding-top 0.4s ease",
+      }}>
+        {/* Hero / search section */}
+        <div style={{
+          display: "flex", flexDirection: "column",
+          alignItems: "center",
+          justifyContent: hasSearched ? "flex-start" : "center",
+          minHeight: hasSearched ? "auto" : "100vh",
+          padding: hasSearched ? "0 32px 24px" : "0 32px",
+          transition: "all 0.4s ease",
+        }}>
+          {/* Empty state — wordmark + hero + chips */}
           {!hasSearched && (
-            <div style={{ textAlign: "center", marginBottom: 40 }}>
-              <h1
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: 42,
-                  fontWeight: 300,
-                  letterSpacing: "0.2em",
-                  color: "#F5F5F0",
-                  marginBottom: 8,
-                }}
-              >
+            <div style={{ width: "100%", maxWidth: 960, textAlign: "center", marginBottom: 36 }}>
+              <h1 style={{
+                fontFamily: "var(--font-display)", fontSize: 42, fontWeight: 300,
+                letterSpacing: "0.2em", color: "#F5F5F0", marginBottom: 32,
+              }}>
                 FASHION ARCHIVE
               </h1>
-              <a
-                href="/timeline"
-                style={{
-                  fontSize: 11,
-                  letterSpacing: "0.18em",
-                  color: "#8A8A85",
-                  textDecoration: "none",
-                  borderBottom: "1px solid #2A2A2A",
-                  paddingBottom: 2,
-                  transition: "color 0.2s, border-color 0.2s",
-                }}
-                onMouseEnter={(e) => { (e.target as HTMLElement).style.color = "#C8A97A"; (e.target as HTMLElement).style.borderBottomColor = "#C8A97A"; }}
-                onMouseLeave={(e) => { (e.target as HTMLElement).style.color = "#8A8A85"; (e.target as HTMLElement).style.borderBottomColor = "#2A2A2A"; }}
-              >
-                CHANEL A/W TIMELINE →
-              </a>
+
+              {/* Hero moment */}
+              {heroResult && (
+                <HeroMoment
+                  result={heroResult}
+                  onPlay={(r) => setPlayingMoment({ id: r.moment_id, brand: r.brand, season: r.season })}
+                />
+              )}
             </div>
           )}
 
           {/* Search input */}
-          <div
-            style={{
-              width: "100%",
-              maxWidth: 640,
-              position: "relative",
-            }}
-          >
+          <div style={{ width: "100%", maxWidth: 640, position: "relative" }}>
             <input
               type="text"
               value={query}
@@ -1148,121 +1148,138 @@ export default function Home() {
               placeholder="Search the archive…"
               autoFocus
               style={{
-                width: "100%",
-                background: "#141414",
-                border: "1px solid rgba(255,255,255,0.08)",
-                borderRadius: 8,
+                width: "100%", background: "#141414",
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
                 padding: "16px 20px 16px 48px",
-                fontFamily: "var(--font-body)",
-                fontSize: 15,
-                color: "#F5F5F0",
+                fontFamily: "var(--font-body)", fontSize: 15, color: "#F5F5F0",
                 transition: "border-color 0.2s",
               }}
-              onFocus={(e) =>
-                (e.target.style.borderColor = "rgba(237,232,220,0.25)")
-              }
-              onBlur={(e) =>
-                (e.target.style.borderColor = "rgba(255,255,255,0.08)")
-              }
+              onFocus={(e) => (e.target.style.borderColor = "rgba(237,232,220,0.25)")}
+              onBlur={(e) => (e.target.style.borderColor = "rgba(255,255,255,0.08)")}
             />
-            {/* Search icon */}
-            <span
-              style={{
-                position: "absolute",
-                left: 16,
-                top: "50%",
-                transform: "translateY(-50%)",
-                color: "#8A8A85",
-                fontSize: 20,
-                pointerEvents: "none",
-              }}
-            >
-              ⌕
-            </span>
-
-            {/* Loading indicator */}
+            <span style={{
+              position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)",
+              color: "#8A8A85", fontSize: 20, pointerEvents: "none",
+            }}>⌕</span>
             {loading && (
-              <span
-                style={{
-                  position: "absolute",
-                  right: 16,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  width: 12,
-                  height: 12,
-                  border: "1.5px solid rgba(237,232,220,0.3)",
-                  borderTopColor: "#EDE8DC",
-                  borderRadius: "50%",
-                  animation: "spin 0.6s linear infinite",
-                  display: "block",
-                }}
-              />
+              <span style={{
+                position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)",
+                width: 12, height: 12,
+                border: "1.5px solid rgba(237,232,220,0.3)", borderTopColor: "#EDE8DC",
+                borderRadius: "50%", animation: "spin 0.6s linear infinite", display: "block",
+              }} />
             )}
-            <style>{`@keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }`}</style>
           </div>
+
+          {/* Curated query chips — show when no active search */}
+          {!hasSearched && (
+            <div style={{
+              display: "flex", gap: 8, flexWrap: "wrap",
+              justifyContent: "center", marginTop: 20,
+              animation: "fadeIn 0.5s ease 0.2s both",
+            }}>
+              {CURATED_QUERIES.map((chip) => (
+                <button
+                  key={chip}
+                  onClick={() => handleChipClick(chip)}
+                  style={{
+                    background: "none",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 100, padding: "6px 14px", cursor: "pointer",
+                    fontFamily: "var(--font-body)", fontSize: 12,
+                    color: "#8A8A85", letterSpacing: "0.03em",
+                    transition: "color 0.15s, border-color 0.15s",
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#EDE8DC"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(237,232,220,0.25)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#8A8A85"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Result count */}
           {hasSearched && !loading && (
-            <div
-              style={{
-                width: "100%",
-                maxWidth: 640,
-                marginTop: 10,
-                fontFamily: "var(--font-body)",
-                fontSize: 11,
-                color: "#8A8A85",
-                letterSpacing: "0.05em",
-              }}
-            >
-              {results.length} result{results.length !== 1 ? "s" : ""} ·{" "}
-              {processingTime}ms
+            <div style={{
+              width: "100%", maxWidth: 640, marginTop: 10,
+              fontFamily: "var(--font-body)", fontSize: 11,
+              color: "#8A8A85", letterSpacing: "0.05em",
+            }}>
+              {results.length} result{results.length !== 1 ? "s" : ""} · {processingTime}ms
             </div>
           )}
         </div>
 
         {/* Weak match warning */}
         {hasSearched && weakMatch && (
-          <div
-            style={{
-              maxWidth: 640,
-              margin: "0 auto 20px",
-              padding: "10px 16px",
-              borderRadius: 6,
-              background: "#1C1500",
-              border: "1px solid #3D2E00",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              fontFamily: "var(--font-body)",
-              fontSize: 12,
-              color: "#FACC15",
-              letterSpacing: "0.03em",
-            }}
-          >
+          <div style={{
+            maxWidth: 640, margin: "0 auto 20px", padding: "10px 16px",
+            borderRadius: 6, background: "#1C1500", border: "1px solid #3D2E00",
+            display: "flex", alignItems: "center", gap: 10,
+            fontFamily: "var(--font-body)", fontSize: 12, color: "#FACC15", letterSpacing: "0.03em",
+          }}>
             <span style={{ fontSize: 14 }}>⚠</span>
             No strong match found in the archive — showing closest results
           </div>
         )}
 
+        {/* Synthesis line */}
+        {hasSearched && (synthesis || synthesizing) && results.length > 0 && (
+          <div style={{
+            maxWidth: 1280, margin: "0 auto 24px", padding: "0 32px",
+            animation: "fadeIn 0.4s ease",
+          }}>
+            <div style={{
+              padding: "16px 20px",
+              borderLeft: "2px solid rgba(237,232,220,0.2)",
+              background: "rgba(237,232,220,0.03)",
+              borderRadius: "0 6px 6px 0",
+            }}>
+              <div style={{
+                fontFamily: "var(--font-body)", fontSize: 9, letterSpacing: "0.14em",
+                color: "#8A8A85", textTransform: "uppercase", marginBottom: 8,
+              }}>
+                Intelligence
+              </div>
+              {synthesizing && !synthesis ? (
+                <div style={{ fontFamily: "var(--font-body)", fontSize: 12, color: "#555", fontStyle: "italic" }}>
+                  Reading the results…
+                </div>
+              ) : synthesis?.grounded ? (
+                <div style={{
+                  fontFamily: "var(--font-display)", fontSize: 17, fontWeight: 300,
+                  color: "#EDE8DC", lineHeight: 1.6, letterSpacing: "0.03em",
+                }}>
+                  {synthesis.synthesis}
+                </div>
+              ) : (
+                <div style={{
+                  fontFamily: "var(--font-body)", fontSize: 12,
+                  color: "#8A8A85", fontStyle: "italic",
+                }}>
+                  {synthesis?.synthesis || "Not enough consistent evidence across these results to call a trend."}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Results grid */}
         {hasSearched && results.length > 0 && (
-          <div
-            style={{
-              padding: "0 32px 64px",
-              display: "grid",
-              gridTemplateColumns:
-                "repeat(auto-fill, minmax(300px, 1fr))",
-              gap: 16,
-              maxWidth: 1280,
-              margin: "0 auto",
-            }}
-          >
+          <div style={{
+            padding: "0 32px 64px",
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+            gap: 16, maxWidth: 1280, margin: "0 auto",
+          }}>
             {results.map((r) => (
               <ResultCard
                 key={r.moment_id}
                 result={r}
                 bookmarks={new Set(bookmarks.keys())}
                 pinned={new Set(moodBoard.keys())}
+                highlighted={citedIds.has(r.moment_id)}
                 onBookmark={handleBookmark}
                 onPin={handlePin}
                 onExport={handleExport}
@@ -1272,37 +1289,88 @@ export default function Home() {
           </div>
         )}
 
-        {/* Empty state */}
+        {/* No results */}
         {hasSearched && !loading && results.length === 0 && (
           <div style={{ textAlign: "center", padding: "60px 32px", fontFamily: "var(--font-display)", fontSize: 18, color: "#8A8A85", fontWeight: 300 }}>
             No results for "{query}"
           </div>
         )}
 
-        {/* Shows grid — visible when no search active */}
-        {!hasSearched && shows.length > 0 && (
+        {/* Empty state — shows grid + timeline tile */}
+        {!hasSearched && (
           <div style={{ padding: "0 32px 64px", maxWidth: 960, margin: "0 auto", width: "100%" }}>
-            <div style={{ fontFamily: "var(--font-body)", fontSize: 10, letterSpacing: "0.14em", color: "#8A8A85", textTransform: "uppercase", marginBottom: 16, textAlign: "center" }}>
-              Browse shows — click for brief
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
-              {shows.filter((s) => s.status === "ready").map((show) => (
-                <button
-                  key={show.id}
-                  onClick={() => setActiveBrief(show)}
-                  style={{
-                    background: "#141414", border: "1px solid rgba(255,255,255,0.06)",
-                    borderRadius: 6, padding: "12px 14px", cursor: "pointer",
-                    textAlign: "left", transition: "border-color 0.15s",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.14)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}
-                >
-                  <div style={{ fontFamily: "var(--font-body)", fontSize: 11, color: "#EDE8DC", letterSpacing: "0.06em", marginBottom: 3 }}>{show.brand}</div>
-                  <div style={{ fontFamily: "var(--font-body)", fontSize: 10, color: "#8A8A85", letterSpacing: "0.05em" }}>{show.season} · {show.moment_count} looks</div>
-                </button>
-              ))}
-            </div>
+
+            {/* Timeline destination tile */}
+            <a href="/timeline" style={{ textDecoration: "none", display: "block", marginBottom: 24 }}
+              onClick={() => log("timeline_click", { from: "empty_state" })}
+            >
+              <div style={{
+                background: "#141414", border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: 8, padding: "20px 24px",
+                display: "flex", alignItems: "center", gap: 20,
+                transition: "border-color 0.15s, background 0.15s",
+              }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "#C8A97A"; (e.currentTarget as HTMLElement).style.background = "#181510"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.background = "#141414"; }}
+              >
+                <div style={{
+                  width: 48, height: 48, borderRadius: 6,
+                  background: "rgba(200,169,122,0.1)",
+                  border: "1px solid rgba(200,169,122,0.2)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 20, flexShrink: 0,
+                }}>
+                  ↗
+                </div>
+                <div>
+                  <div style={{
+                    fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 300,
+                    color: "#EDE8DC", letterSpacing: "0.06em", marginBottom: 4,
+                  }}>
+                    Follow a house through time
+                  </div>
+                  <div style={{
+                    fontFamily: "var(--font-body)", fontSize: 11,
+                    color: "#8A8A85", letterSpacing: "0.05em",
+                  }}>
+                    Chanel A/W, 1993 → 2025 — track house codes across 30 years of archive
+                  </div>
+                </div>
+                <div style={{ marginLeft: "auto", fontFamily: "var(--font-body)", fontSize: 11, color: "#C8A97A", letterSpacing: "0.1em" }}>
+                  Timeline →
+                </div>
+              </div>
+            </a>
+
+            {/* Shows grid */}
+            {shows.length > 0 && (
+              <>
+                <div style={{
+                  fontFamily: "var(--font-body)", fontSize: 10, letterSpacing: "0.14em",
+                  color: "#8A8A85", textTransform: "uppercase", marginBottom: 12,
+                }}>
+                  Browse shows — click for brief
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
+                  {shows.filter((s) => s.status === "ready").map((show) => (
+                    <button
+                      key={show.id}
+                      onClick={() => { setActiveBrief(show); log("brief_open", { show_id: show.id, brand: show.brand }); }}
+                      style={{
+                        background: "#141414", border: "1px solid rgba(255,255,255,0.06)",
+                        borderRadius: 6, padding: "12px 14px", cursor: "pointer",
+                        textAlign: "left", transition: "border-color 0.15s",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.14)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)")}
+                    >
+                      <div style={{ fontFamily: "var(--font-body)", fontSize: 11, color: "#EDE8DC", letterSpacing: "0.06em", marginBottom: 3 }}>{show.brand}</div>
+                      <div style={{ fontFamily: "var(--font-body)", fontSize: 10, color: "#8A8A85", letterSpacing: "0.05em" }}>{show.season} · {show.moment_count} looks</div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
       </main>
@@ -1338,7 +1406,6 @@ export default function Home() {
           onClose={() => setPlayingMoment(null)}
         />
       )}
-
     </>
   );
 }

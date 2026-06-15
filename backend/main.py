@@ -171,6 +171,14 @@ async def search(req: SearchRequest):
                     "thumbnail_url": moment.thumbnail_url or item.get("thumbnail_url"),
                     "confidence": confidence,
                     "score_raw": round(score, 4),
+                    "creative_director": show.creative_director,
+                    "show_date": show.show_date.isoformat() if show.show_date else None,
+                    "source": show.source,
+                    "enriched": {
+                        "garments": enriched.get("garments", []),
+                        "colours": enriched.get("colours", []),
+                        "silhouette": enriched.get("silhouette", ""),
+                    },
                 })
 
     elapsed = round((time.time() - start) * 1000)
@@ -180,6 +188,48 @@ async def search(req: SearchRequest):
         "total": len(results),
         "processing_time_ms": elapsed,
     }
+
+
+# ─────────────────────────────────────────
+# SYNTHESIZE
+# ─────────────────────────────────────────
+
+class SynthesizeRequest(BaseModel):
+    query: str
+    moment_ids: list[str]
+
+
+@app.post("/api/synthesize")
+async def synthesize(req: SynthesizeRequest):
+    """Grounded one-sentence synthesis over a set of search results."""
+    from services.database import AsyncSessionLocal, Moment, Show
+    from sqlalchemy import select
+    from services.claude import synthesize_results
+
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(
+            select(Moment, Show)
+            .join(Show, Show.id == Moment.show_id)
+            .where(Moment.id.in_(req.moment_ids[:8]))
+        )).all()
+
+    moments = []
+    for moment, show in rows:
+        enriched = moment.enriched_data or {}
+        moments.append({
+            "moment_id": str(moment.id),
+            "brand": show.brand,
+            "season": show.season,
+            "description": enriched.get("description") or moment.description or "",
+            "enriched": {
+                "garments": enriched.get("garments", []),
+                "colours": enriched.get("colours", []),
+                "silhouette": enriched.get("silhouette", ""),
+            },
+        })
+
+    result = await synthesize_results(req.query, moments)
+    return result
 
 
 # ─────────────────────────────────────────

@@ -26,7 +26,7 @@ INDEX_ID = os.getenv("TWELVE_LABS_INDEX_ID")
 # Marengo3.0 text↔image cross-modal similarity clusters 0.06–0.14 for fashion queries.
 # 0.09 = "Good" band floor — suppress "Relevant" results entirely since wrong-colour
 # near-misses (blue skirt for black, orange skirt) erode trust more than no result.
-SIMILARITY_THRESHOLD = 0.09
+SIMILARITY_THRESHOLD = 0.07
 
 # Known brands — used to extract brand filter from free-text queries
 KNOWN_BRANDS = [

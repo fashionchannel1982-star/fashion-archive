@@ -67,6 +67,10 @@ class SearchResult(BaseModel):
     thumbnail_url: Optional[str] = None
     confidence: int
     score_raw: float
+    creative_director: Optional[str] = None
+    show_date: Optional[str] = None
+    source: Optional[str] = None
+    enriched: Optional[dict] = None
 
 
 class SearchResponse(BaseModel):
