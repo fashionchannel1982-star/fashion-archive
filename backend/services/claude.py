@@ -1,7 +1,7 @@
 """
 Fashion Archive — Claude Service
 AI enrichment layer. Runs after Twelve Labs ingestion.
-Uses claude-sonnet-4-20250514 for look enrichment and editorial generation.
+Uses claude-sonnet-4-6 for look enrichment and editorial generation.
 """
 
 import os
@@ -11,7 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 
 
 async def enrich_look(raw_description: str, show_context: dict) -> dict:
