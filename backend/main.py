@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 import time
 import os
@@ -96,15 +96,20 @@ async def get_shows():
 # ─────────────────────────────────────────
 
 class SearchRequest(BaseModel):
-    query: str
-    limit: int = 20
+    query: str = Field(..., min_length=1, max_length=500)
+    limit: int = Field(default=20, ge=1, le=50)
+
+    @field_validator("query")
+    @classmethod
+    def query_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Query cannot be blank")
+        return v
 
 
 @app.post("/api/search")
 async def search(req: SearchRequest):
     """Semantic search across ingested moments via Twelve Labs."""
-    if not req.query.strip():
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
 
     start = time.time()
 
@@ -195,8 +200,8 @@ async def search(req: SearchRequest):
 # ─────────────────────────────────────────
 
 class SynthesizeRequest(BaseModel):
-    query: str
-    moment_ids: list[str]
+    query: str = Field(..., min_length=1, max_length=500)
+    moment_ids: list[str] = Field(..., min_length=1, max_length=50)
 
 
 @app.post("/api/synthesize")
