@@ -512,20 +512,19 @@ async def get_timeline(house: str = "Chanel", season_type: str = "AW-RTW", code:
                     anchor_vec = anchor_vec_row.scalar()
 
                     if anchor_vec:
-                        vec_str = anchor_vec  # already stored as pgvector string
                         other_ids = [str(m.id) for m in tagged_moments if m.show_id != anchor.show_id]
                         if other_ids:
-                            id_list = "', '".join(other_ids)
-                            echo_row = await session.execute(sql_text(f"""
+                            import uuid as _uuid
+                            echo_row = await session.execute(sql_text("""
                                 SELECT m.id, m.show_id, m.timestamp_start, m.description,
                                        m.thumbnail_url, s.season, s.year,
-                                       1 - (m.embedding <=> '{vec_str}'::vector) AS similarity
+                                       1 - (m.embedding <=> cast(:vec AS vector)) AS similarity
                                 FROM moments m
                                 JOIN shows s ON s.id = m.show_id
-                                WHERE m.id IN ('{id_list}')
-                                ORDER BY m.embedding <=> '{vec_str}'::vector
+                                WHERE m.id = ANY(:ids ::uuid[])
+                                ORDER BY m.embedding <=> cast(:vec AS vector)
                                 LIMIT 1
-                            """))
+                            """), {"vec": str(anchor_vec), "ids": other_ids})
                             best = echo_row.fetchone()
                             if best:
                                 echo = {
