@@ -4,7 +4,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import Hls from "hls.js";
+import type Hls from "hls.js";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -153,11 +153,12 @@ async function loadHls(
 
   let hls: Hls | null = null;
 
-  if (Hls.isSupported()) {
-    hls = new Hls({ startPosition: clipStart });
+  const HlsLib = (await import("hls.js")).default;
+  if (HlsLib.isSupported()) {
+    hls = new HlsLib({ startPosition: clipStart });
     hls.loadSource(data.hls_url);
     hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+    hls.on(HlsLib.Events.MANIFEST_PARSED, () => {
       video.currentTime = clipStart;
       video.play().catch(() => {});
     });
@@ -573,12 +574,13 @@ function VideoModal({
         };
         video.addEventListener("timeupdate", onTimeUpdate);
 
-        if (Hls.isSupported()) {
-          const hls = new Hls({ startPosition: clipStart });
+        const HlsLib = (await import("hls.js")).default;
+        if (HlsLib.isSupported()) {
+          const hls = new HlsLib({ startPosition: clipStart });
           hlsRef.current = hls;
           hls.loadSource(data.hls_url);
           hls.attachMedia(video);
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          hls.on(HlsLib.Events.MANIFEST_PARSED, () => {
             video.currentTime = clipStart;
             video.play().catch(() => {});
           });
