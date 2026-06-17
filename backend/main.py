@@ -31,6 +31,20 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Sentry — no-op when SENTRY_DSN is unset; set it in prod to enable error tracking.
+_sentry_dsn = os.getenv("SENTRY_DSN", "")
+if _sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+        traces_sample_rate=0.1,
+        send_default_pii=False,
+    )
+    logger.info("Sentry error tracking enabled")
+
 app = FastAPI(title="Fashion Archive API", version="2.0.0")
 
 _cors_origins = [
