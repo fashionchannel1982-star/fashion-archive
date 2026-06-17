@@ -499,14 +499,23 @@ async def get_timeline(house: str = "Chanel", season_type: str = "AW-RTW", code:
     if not shows:
         return {"house": house, "season_type": season_type, "points": [], "total": 0}
 
+    show_ids = [s.id for s in shows]
+
+    # Single query for all moments across all shows — avoids N+1 sessions
+    async with AsyncSessionLocal() as session:
+        all_moments_rows = await session.execute(
+            select(Moment).where(Moment.show_id.in_(show_ids))
+        )
+        all_moments = all_moments_rows.scalars().all()
+
+    from collections import defaultdict
+    moments_by_show: dict = defaultdict(list)
+    for m in all_moments:
+        moments_by_show[m.show_id].append(m)
+
     points = []
     for show in shows:
-        async with AsyncSessionLocal() as session:
-            moments_rows = await session.execute(
-                select(Moment).where(Moment.show_id == show.id)
-            )
-            moments = moments_rows.scalars().all()
-
+        moments = moments_by_show[show.id]
         total = len(moments)
         code_agg = {}
         for c in CHANEL_CODES:
