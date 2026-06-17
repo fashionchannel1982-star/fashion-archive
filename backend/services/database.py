@@ -88,6 +88,24 @@ class Moment(Base):
     show: Mapped["Show"] = relationship("Show", back_populates="moments")
 
 
+class Event(Base):
+    """
+    Behavioural signal log — every search, click, export, and play.
+    Also serves as the access-audit trail for content attribution.
+    Schema is intentionally wide: nullable fields are populated only
+    for the event types where they're meaningful.
+    """
+    __tablename__ = "events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    event_type: Mapped[str] = mapped_column(String, nullable=False)       # search | result_click | export | play
+    query_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    moment_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    session_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    event_meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class Provenance(Base):
     __tablename__ = "provenance"
 
@@ -171,3 +189,30 @@ async def get_moment(session: AsyncSession, moment_id: str) -> Optional[Moment]:
 async def create_schema(conn):
     """Create all tables. Called from init_db.py."""
     await conn.run_sync(Base.metadata.create_all)
+
+
+async def log_event(
+    event_type: str,
+    *,
+    query_text: Optional[str] = None,
+    moment_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> None:
+    """
+    Fire-and-forget event capture. Never raises — any DB error is swallowed
+    so it never blocks or breaks a user request.
+    """
+    import logging
+    try:
+        async with AsyncSessionLocal() as db:
+            db.add(Event(
+                event_type=event_type,
+                query_text=query_text,
+                moment_id=moment_id,
+                session_id=session_id,
+                event_meta=metadata,
+            ))
+            await db.commit()
+    except Exception:
+        logging.getLogger(__name__).warning("event log failed", exc_info=True)

@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
+import asyncio
 import time
 import os
 import logging
@@ -192,6 +193,14 @@ async def search(req: SearchRequest):
                 })
 
     elapsed = round((time.time() - start) * 1000)
+
+    from services.database import log_event
+    asyncio.create_task(log_event(
+        "search",
+        query_text=req.query,
+        metadata={"result_count": len(results), "processing_time_ms": elapsed},
+    ))
+
     return {
         "query": req.query,
         "results": results,
@@ -292,6 +301,14 @@ async def export_moment(req: ExportRequest):
         }
 
         filename = f"fa-export-{show.brand.lower()}-{int(moment.timestamp_start)}s.json"
+
+        from services.database import log_event
+        asyncio.create_task(log_event(
+            "export",
+            moment_id=req.moment_id,
+            metadata={"brand": show.brand, "season": show.season},
+        ))
+
         return JSONResponse(
             content=export,
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
@@ -406,6 +423,38 @@ async def export_moodboard(req: MoodBoardExportRequest):
         "title": req.title,
         "source": "Fashion Archive — Internal MVP",
         "items": items,
+    }
+
+
+# ─────────────────────────────────────────
+# ADMIN — INTERNAL ONLY (no auth yet)
+# ─────────────────────────────────────────
+
+@app.get("/api/admin/events")
+async def admin_events(limit: int = 20):
+    """Internal endpoint: recent events + total count. Confirms signal capture is working."""
+    from services.database import AsyncSessionLocal, Event
+    from sqlalchemy import select, func
+
+    async with AsyncSessionLocal() as session:
+        total = (await session.execute(select(func.count()).select_from(Event))).scalar()
+        rows = (await session.execute(
+            select(Event).order_by(Event.created_at.desc()).limit(limit)
+        )).scalars().all()
+
+    return {
+        "total": total,
+        "recent": [
+            {
+                "id": e.id,
+                "event_type": e.event_type,
+                "query_text": e.query_text,
+                "moment_id": e.moment_id,
+                "event_meta": e.event_meta,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in rows
+        ],
     }
 
 
@@ -603,6 +652,13 @@ async def get_play_url(moment_id: str):
     hls_url = data.get("hls", {}).get("video_url")
     if not hls_url:
         raise HTTPException(status_code=404, detail="No HLS stream available")
+
+    from services.database import log_event
+    asyncio.create_task(log_event(
+        "play",
+        moment_id=moment_id,
+        metadata={"brand": show.brand, "season": show.season},
+    ))
 
     return {
         "hls_url": hls_url,
