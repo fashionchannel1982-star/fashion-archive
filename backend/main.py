@@ -596,14 +596,13 @@ async def get_timeline(house: str = "Chanel", season_type: str = "AW-RTW", code:
                     if anchor_vec:
                         other_ids = [str(m.id) for m in tagged_moments if m.show_id != anchor.show_id]
                         if other_ids:
-                            import uuid as _uuid
                             echo_row = await session.execute(sql_text("""
                                 SELECT m.id, m.show_id, m.timestamp_start, m.description,
                                        m.thumbnail_url, s.season, s.year,
                                        1 - (m.embedding <=> cast(:vec AS vector)) AS similarity
                                 FROM moments m
                                 JOIN shows s ON s.id = m.show_id
-                                WHERE m.id = ANY(:ids ::uuid[])
+                                WHERE m.id IN (SELECT unnest(cast(:ids AS text[])))
                                 ORDER BY m.embedding <=> cast(:vec AS vector)
                                 LIMIT 1
                             """), {"vec": str(anchor_vec), "ids": other_ids})
