@@ -14,7 +14,7 @@ Endpoints:
   POST /api/export
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -114,7 +114,7 @@ class SearchRequest(BaseModel):
 
 
 @app.post("/api/search")
-async def search(req: SearchRequest):
+async def search(req: SearchRequest, bg: BackgroundTasks):
     """Semantic search across ingested moments via Twelve Labs."""
 
     start = time.time()
@@ -128,6 +128,8 @@ async def search(req: SearchRequest):
     tl_results = await twelvelabs.semantic_search(req.query, limit=req.limit)
 
     if not tl_results:
+        from services.database import log_event
+        bg.add_task(log_event, "search", query_text=req.query, metadata={"result_count": 0})
         return {
             "query": req.query,
             "results": [],
@@ -195,11 +197,10 @@ async def search(req: SearchRequest):
     elapsed = round((time.time() - start) * 1000)
 
     from services.database import log_event
-    asyncio.create_task(log_event(
-        "search",
+    bg.add_task(log_event, "search",
         query_text=req.query,
         metadata={"result_count": len(results), "processing_time_ms": elapsed},
-    ))
+    )
 
     return {
         "query": req.query,
@@ -260,7 +261,7 @@ class ExportRequest(BaseModel):
 
 
 @app.post("/api/export")
-async def export_moment(req: ExportRequest):
+async def export_moment(req: ExportRequest, bg: BackgroundTasks):
     """Returns a structured JSON export card for a single moment."""
     from services.database import AsyncSessionLocal, get_moment
     from sqlalchemy import select
@@ -303,11 +304,10 @@ async def export_moment(req: ExportRequest):
         filename = f"fa-export-{show.brand.lower()}-{int(moment.timestamp_start)}s.json"
 
         from services.database import log_event
-        asyncio.create_task(log_event(
-            "export",
+        bg.add_task(log_event, "export",
             moment_id=req.moment_id,
             metadata={"brand": show.brand, "season": show.season},
-        ))
+        )
 
         return JSONResponse(
             content=export,
@@ -628,7 +628,7 @@ async def get_timeline(house: str = "Chanel", season_type: str = "AW-RTW", code:
 
 
 @app.get("/api/moments/{moment_id}/play")
-async def get_play_url(moment_id: str):
+async def get_play_url(moment_id: str, bg: BackgroundTasks):
     """Returns HLS stream URL + timestamp for video playback."""
     from services.database import AsyncSessionLocal, Moment, Show
     from sqlalchemy import select
@@ -663,11 +663,10 @@ async def get_play_url(moment_id: str):
         raise HTTPException(status_code=404, detail="No HLS stream available")
 
     from services.database import log_event
-    asyncio.create_task(log_event(
-        "play",
+    bg.add_task(log_event, "play",
         moment_id=moment_id,
         metadata={"brand": show.brand, "season": show.season},
-    ))
+    )
 
     return {
         "hls_url": hls_url,

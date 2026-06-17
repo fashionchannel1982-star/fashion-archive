@@ -32,6 +32,17 @@ python3 backend/scripts/init_db.py
 
 ---
 
+## Run the test suite
+
+```bash
+cd ~/Desktop/fashion-archive/backend
+source venv/bin/activate
+# Backend must be running first (see Terminal window 2 below)
+pytest tests/ -v
+```
+
+---
+
 ## Terminal window 2 — Backend
 
 ```bash
