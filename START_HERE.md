@@ -39,6 +39,10 @@ cd ~/Desktop/fashion-archive/backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+
+# Apply any pending DB migrations (run this every time you pull)
+python -m alembic upgrade head
+
 uvicorn main:app --reload --port 8000
 ```
 
