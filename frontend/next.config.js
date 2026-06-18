@@ -2,7 +2,10 @@
 const nextConfig = {
   reactStrictMode: true,
   images: {
-    domains: ['cdn.twelvelabs.io', 'localhost'],
+    remotePatterns: [
+      { protocol: 'https', hostname: 'cdn.twelvelabs.io' },
+      { protocol: 'http', hostname: 'localhost' },
+    ],
   },
 }
 module.exports = nextConfig
