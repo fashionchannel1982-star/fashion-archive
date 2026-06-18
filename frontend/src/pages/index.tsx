@@ -823,7 +823,6 @@ function BookmarkPanel({ bookmarks, onRemove, onClose }: {
       zIndex: 100, display: "flex", flexDirection: "column",
       animation: "slideIn 0.2s ease",
     }}>
-      <style>{`@keyframes slideIn { from { transform: translateX(100%) } to { transform: translateX(0) } }`}</style>
       <div style={{
         padding: "24px 20px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)",
         display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -1036,14 +1035,6 @@ export default function Home() {
 
   return (
     <>
-      <style>{`
-        @keyframes slideIn { from { transform: translateX(100%) } to { transform: translateX(0) } }
-        @keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-        .hero-play-overlay { opacity: 0 !important; transition: opacity 0.2s; }
-        div:has(> .hero-play-overlay):hover .hero-play-overlay { opacity: 1 !important; }
-      `}</style>
-
       {/* Top bar */}
       <div style={{
         position: "fixed", top: 0, left: 0, right: 0, height: 52,

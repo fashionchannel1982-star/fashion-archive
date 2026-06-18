@@ -18,3 +18,8 @@ input:focus { outline: none; }
 ::-webkit-scrollbar-thumb { background: #2A2A2A; border-radius: 2px; }
 div:has(> .play-btn):hover .play-btn { opacity: 1 !important; }
 div:has(> .hero-play-overlay):hover .hero-play-overlay { opacity: 1 !important; }
+
+@keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.hero-play-overlay { opacity: 0; transition: opacity 0.2s; }
