@@ -149,6 +149,7 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
             "results": [],
             "total": 0,
             "processing_time_ms": round((time.time() - start) * 1000),
+            "synthesis": None,
         }
 
     results = []
@@ -217,12 +218,18 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
         metadata={"result_count": len(results), "processing_time_ms": elapsed},
     )
 
+    # Synthesize when ≥2 results and query is conceptual (multi-word; skip bare brand lookups)
+    synthesis_text = None
+    if len(results) >= 2 and len(req.query.strip().split()) > 1:
+        from services.claude import synthesize_results
+        synthesis_text = await synthesize_results(req.query, results[:5])
+
     return {
         "query": req.query,
         "results": results,
         "total": len(results),
         "processing_time_ms": elapsed,
-        "synthesis": None,  # populated by /api/synthesize; placeholder for forward-compat
+        "synthesis": synthesis_text,
     }
 
 
@@ -264,8 +271,13 @@ async def synthesize(req: SynthesizeRequest):
             },
         })
 
-    result = await synthesize_results(req.query, moments)
-    return result
+    text = await synthesize_results(req.query, moments)
+    cited_ids = [m["moment_id"] for m in moments]
+    return {
+        "synthesis": text or "",
+        "grounded": text is not None,
+        "cited_moment_ids": cited_ids,
+    }
 
 
 # ─────────────────────────────────────────

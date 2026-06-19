@@ -76,72 +76,52 @@ Return only the JSON object. No preamble, no explanation."""
         }
 
 
-async def synthesize_results(query: str, moments: list[dict]) -> dict:
+async def synthesize_results(query: str, top_results: list[dict]) -> str | None:
     """
-    One grounded sentence over the structured metadata of the top results.
-    Returns {"synthesis": str, "grounded": bool, "cited_moment_ids": [...]}.
-    Guardrail: assert only what the cited clips support; if evidence is thin
-    or contradictory, say so rather than inventing a trend.
+    One grounded cited sentence across the top search results.
+    Guardrail: grounded ONLY in provided moments — never invents a brand or detail.
+    Returns None when evidence is thin, results are empty, or any error occurs.
     """
-    if not moments:
-        return {"synthesis": "", "grounded": False, "cited_moment_ids": []}
+    import asyncio
 
-    top = moments[:8]
-    cited_ids = [m.get("moment_id", "") for m in top]
+    if not top_results:
+        return None
 
+    top = top_results[:5]
     lines = []
     for m in top:
-        brand = m.get("brand", "")
-        season = m.get("season", "")
-        desc = m.get("description", "")
-        enriched = m.get("enriched") or {}
-        colours = ", ".join(enriched.get("colours", [])) if enriched.get("colours") else ""
-        silhouette = enriched.get("silhouette", "")
-        parts = [f"{brand} {season}:", desc]
-        if colours:
-            parts.append(f"Colours: {colours}.")
-        if silhouette:
-            parts.append(f"Silhouette: {silhouette}.")
-        lines.append(" ".join(parts))
-
-    moments_block = "\n".join(f"- {l}" for l in lines)
+        lines.append(
+            f"- {m.get('brand','')} {m.get('season','')} {m.get('year','')}: {m.get('description','')}"
+        )
+    moments_block = "\n".join(lines)
 
     system = (
-        "You are a fashion intelligence system that synthesises search results "
-        "into one grounded editorial observation. Never fabricate or generalise "
-        "beyond what the cited clips explicitly support."
+        "You are a fashion-archive intelligence layer. Given a user query and the top "
+        "retrieved runway moments, write ONE sentence (max 30 words) that names a concrete "
+        "through-line across the results and cites at least two houses by name. "
+        "Your sentence must be grounded ONLY in the provided moments — never invent a brand, "
+        "season, or detail not present. If the results are too sparse or unrelated to support "
+        "a real observation, return the exact string NONE."
     )
 
-    prompt = f"""Query: "{query}"
-
-Archive clips returned:
-{moments_block}
-
-Write ONE sentence in fashion-editor voice that captures what these specific clips share or signal.
-Name the houses they come from. If the set is too thin or the clips are too disparate to support a credible read, reply with ONLY: INSUFFICIENT_EVIDENCE
-
-One sentence only. No preamble."""
+    prompt = f'Query: "{query}"\n\nMoments:\n{moments_block}'
 
     try:
-        import anthropic as _anthropic
-        _client = _anthropic.AsyncAnthropic()
-        msg = await _client.messages.create(
+        msg = await asyncio.to_thread(
+            client.messages.create,
             model=MODEL,
-            max_tokens=200,
+            max_tokens=120,
+            temperature=0.3,
             system=system,
             messages=[{"role": "user", "content": prompt}],
         )
         text = msg.content[0].text.strip()
-        if "INSUFFICIENT_EVIDENCE" in text or len(text) < 20:
-            return {
-                "synthesis": "Not enough consistent evidence across these results to call a trend.",
-                "grounded": False,
-                "cited_moment_ids": cited_ids,
-            }
-        return {"synthesis": text, "grounded": True, "cited_moment_ids": cited_ids}
+        if not text or text == "NONE":
+            return None
+        return text
     except Exception as e:
         logger.warning(f"synthesize_results failed: {e}")
-        return {"synthesis": "", "grounded": False, "cited_moment_ids": []}
+        return None
 
 
 async def generate_show_editorial(show_context: dict, looks: list) -> str:
