@@ -7,6 +7,7 @@ Uses claude-sonnet-4-6 for look enrichment and editorial generation.
 import os
 import anthropic
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ Return only the JSON object. No preamble, no explanation."""
         }
 
 
-async def synthesize_results(query: str, top_results: list[dict]) -> str | None:
+async def synthesize_results(query: str, top_results: list) -> Optional[str]:
     """
     One grounded cited sentence across the top search results.
     Authoritative guard: requires ≥2 distinct brands in the retrieved results.
