@@ -138,8 +138,17 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
     from sqlalchemy import select, text
     from services.database import Moment, Show
 
+    from services.structured_match import parse_query_attributes, attribute_boost
+    attrs = parse_query_attributes(req.query)
+    has_attrs = any(attrs.values())
+
+    # Widen the candidate pool when structured attributes are present so re-ranking
+    # has material to promote; otherwise use the requested limit directly.
+    _MAX_CANDIDATE = 150
+    candidate_limit = min(req.limit * 3, _MAX_CANDIDATE) if has_attrs else req.limit
+
     # Search via Twelve Labs
-    tl_results = await twelvelabs.semantic_search(req.query, limit=req.limit)
+    tl_results = await twelvelabs.semantic_search(req.query, limit=candidate_limit)
 
     if not tl_results:
         from services.database import log_event
@@ -187,6 +196,15 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
                 if not _is_valid_description(description):
                     continue
 
+                enriched_out = {
+                    "garments": enriched.get("garments", []),
+                    "colours": enriched.get("colours", []),
+                    "silhouette": enriched.get("silhouette", ""),
+                    "key_pieces": enriched.get("key_pieces", []),
+                    "search_tags": enriched.get("search_tags", []),
+                }
+                boost = attribute_boost(enriched, attrs) if has_attrs else 0.0
+
                 results.append({
                     "moment_id": moment.id,
                     "show_id": show.id,
@@ -198,17 +216,20 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
                     "timestamp_end": moment.timestamp_end,
                     "description": description,
                     "thumbnail_url": moment.thumbnail_url or item.get("thumbnail_url"),
-                    "confidence": confidence,
+                    "confidence": confidence,       # from original TL score, never boosted
                     "score_raw": round(score, 4),
+                    "_boost": round(boost, 3),      # QA field; remove later if noisy
+                    "_rank_score": score + boost,   # used for sorting only, not displayed
                     "creative_director": show.creative_director,
                     "show_date": show.show_date.isoformat() if show.show_date else None,
                     "source": show.source,
-                    "enriched": {
-                        "garments": enriched.get("garments", []),
-                        "colours": enriched.get("colours", []),
-                        "silhouette": enriched.get("silhouette", ""),
-                    },
+                    "enriched": enriched_out,
                 })
+
+    # Re-rank and truncate when structured attributes are present
+    if has_attrs and results:
+        results.sort(key=lambda r: r["_rank_score"], reverse=True)
+    results = results[: req.limit]
 
     elapsed = round((time.time() - start) * 1000)
 
