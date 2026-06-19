@@ -518,6 +518,11 @@ async def delete_video(video_id: str) -> bool:
     Delete a video from the TL index.
     Returns True on success, False if already gone (404) — never raises.
     Must be called LAST during a replace: only after new moments are committed.
+
+    TL has two delete endpoints depending on how the video was ingested:
+      - /indexes/{id}/videos/{vid}         — task-based ingestion (URL/file upload)
+      - /indexes/{id}/indexed-assets/{vid} — asset-based ingestion
+    We try the task endpoint first; on 409 we retry via indexed-assets.
     """
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.delete(
@@ -525,10 +530,25 @@ async def delete_video(video_id: str) -> bool:
             headers={"x-api-key": API_KEY},
         )
     if r.status_code in (200, 204):
-        logger.info(f"TL video deleted: {video_id}")
+        logger.info(f"TL video deleted (task endpoint): {video_id}")
         return True
     if r.status_code == 404:
         logger.warning(f"TL video already absent (404): {video_id}")
+        return False
+    if r.status_code == 409:
+        # Video was ingested as an asset — use the indexed-assets endpoint
+        async with httpx.AsyncClient(timeout=30) as client:
+            r2 = await client.delete(
+                f"{TWELVE_LABS_BASE_URL}/indexes/{INDEX_ID}/indexed-assets/{video_id}",
+                headers={"x-api-key": API_KEY},
+            )
+        if r2.status_code in (200, 204):
+            logger.info(f"TL video deleted (indexed-assets endpoint): {video_id}")
+            return True
+        if r2.status_code == 404:
+            logger.warning(f"TL indexed-asset already absent (404): {video_id}")
+            return False
+        logger.error(f"TL indexed-assets delete failed for {video_id}: {r2.status_code} {r2.text[:200]}")
         return False
     logger.error(f"TL delete failed for {video_id}: {r.status_code} {r.text[:200]}")
     return False
