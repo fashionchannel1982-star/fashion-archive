@@ -79,8 +79,8 @@ Return only the JSON object. No preamble, no explanation."""
 async def synthesize_results(query: str, top_results: list[dict]) -> str | None:
     """
     One grounded cited sentence across the top search results.
-    Guardrail: grounded ONLY in provided moments — never invents a brand or detail.
-    Returns None when evidence is thin, results are empty, or any error occurs.
+    Authoritative guard: requires ≥2 distinct brands in the retrieved results.
+    Returns None when evidence is thin, single-house, or any error occurs.
     """
     import asyncio
 
@@ -88,6 +88,10 @@ async def synthesize_results(query: str, top_results: list[dict]) -> str | None:
         return None
 
     top = top_results[:5]
+    distinct_brands = {r["brand"] for r in top if r.get("brand")}
+    if len(distinct_brands) < 2:
+        return None
+
     lines = []
     for m in top:
         lines.append(
@@ -117,6 +121,11 @@ async def synthesize_results(query: str, top_results: list[dict]) -> str | None:
         )
         text = msg.content[0].text.strip()
         if not text or text == "NONE":
+            return None
+        # Verify the output actually cites ≥2 of the distinct brands (case-insensitive)
+        text_lower = text.lower()
+        cited_count = sum(1 for b in distinct_brands if b.lower() in text_lower)
+        if cited_count < 2:
             return None
         return text
     except Exception as e:

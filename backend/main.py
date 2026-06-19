@@ -218,9 +218,9 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
         metadata={"result_count": len(results), "processing_time_ms": elapsed},
     )
 
-    # Synthesize when ≥2 results and query is conceptual (multi-word; skip bare brand lookups)
+    # Synthesize when ≥2 results; distinct-brand guard lives inside synthesize_results
     synthesis_text = None
-    if len(results) >= 2 and len(req.query.strip().split()) > 1:
+    if len(results) >= 2:
         from services.claude import synthesize_results
         synthesis_text = await synthesize_results(req.query, results[:5])
 
