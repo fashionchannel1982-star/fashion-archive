@@ -191,6 +191,7 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
                     "show_id": show.id,
                     "brand": show.brand,
                     "season": show.season,
+                    "season_type": show.season_type,
                     "year": show.year,
                     "timestamp_start": moment.timestamp_start,
                     "timestamp_end": moment.timestamp_end,
@@ -221,6 +222,7 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
         "results": results,
         "total": len(results),
         "processing_time_ms": elapsed,
+        "synthesis": None,  # populated by /api/synthesize; placeholder for forward-compat
     }
 
 

@@ -46,6 +46,7 @@ interface SearchResult {
   show_id: string;
   brand: string;
   season: string;
+  season_type?: string | null;
   year: number;
   timestamp_start: number;
   timestamp_end: number;
@@ -68,6 +69,7 @@ interface SearchResponse {
   results: SearchResult[];
   total: number;
   processing_time_ms: number;
+  synthesis?: string | null;
 }
 
 interface ShowItem {
