@@ -513,6 +513,27 @@ async def _search_clips_for_video(video_id: str, query: str, page_limit: int = 5
         return response.json().get("data", [])
 
 
+async def delete_video(video_id: str) -> bool:
+    """
+    Delete a video from the TL index.
+    Returns True on success, False if already gone (404) — never raises.
+    Must be called LAST during a replace: only after new moments are committed.
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.delete(
+            f"{TWELVE_LABS_BASE_URL}/indexes/{INDEX_ID}/videos/{video_id}",
+            headers={"x-api-key": API_KEY},
+        )
+    if r.status_code in (200, 204):
+        logger.info(f"TL video deleted: {video_id}")
+        return True
+    if r.status_code == 404:
+        logger.warning(f"TL video already absent (404): {video_id}")
+        return False
+    logger.error(f"TL delete failed for {video_id}: {r.status_code} {r.text[:200]}")
+    return False
+
+
 async def get_hls_url(video_id: str) -> Optional[str]:
     """Fetch the HLS stream URL for a TL video."""
     async with httpx.AsyncClient(timeout=10) as client:

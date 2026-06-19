@@ -5,6 +5,8 @@ All DB operations go through here — never query directly from routers.
 """
 
 import os
+import re
+import unicodedata
 import uuid
 from typing import Optional
 from datetime import datetime, timezone
@@ -28,6 +30,22 @@ ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg:/
 
 engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+def make_show_key(brand: str, season: str) -> str:
+    """
+    Stable slug for show identity: brand + season only.
+    source is intentionally excluded — it is a mutable attribute that changes
+    when a YouTube placeholder is replaced by an FC master copy.
+    e.g. make_show_key("Dior", "AW25-RTW") → "dior__aw25-rtw"
+    """
+    def slug(s: str) -> str:
+        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+        s = s.lower().strip()
+        s = re.sub(r"[''']", "", s)          # drop apostrophes
+        s = re.sub(r"[^a-z0-9]+", "-", s)   # punctuation/spaces → hyphen
+        return s.strip("-")
+    return f"{slug(brand)}__{slug(season)}"
 
 
 async def get_session():
@@ -64,6 +82,8 @@ class Show(Base):
     source: Mapped[Optional[str]] = mapped_column(String, nullable=True)            # 'youtube_mvp' or 'fc_master'
     source_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_cd_transition: Mapped[Optional[bool]] = mapped_column(nullable=True)
+    # Stable identity key: slugified brand + season (NOT source — source is mutable on replace)
+    show_key: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     moments: Mapped[list["Moment"]] = relationship("Moment", back_populates="show", cascade="all, delete-orphan")
