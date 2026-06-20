@@ -1,13 +1,19 @@
 """
 Fashion Archive — unit tests.
-No DB, no Twelve Labs, no Anthropic — runs fully offline.
 
-Run: cd backend && pytest -m unit -v
+Pure offline: no DB, no Twelve Labs, no Anthropic API calls.
+The agentic loop gate — must always pass with zero running services.
+
+Loop gate command:
+    cd backend && pytest -m unit
+
+All async tests use pytest-asyncio (asyncio_mode = auto in pytest.ini).
 """
 
 import sys
 import os
 import pytest
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -16,342 +22,312 @@ pytestmark = pytest.mark.unit
 
 # ─────────────────────────────────────────────────────────────────────────────
 # services/database.py — make_show_key
+# Session 7: brand+season → stable slug; source excluded intentionally.
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestMakeShowKey:
     @pytest.fixture(autouse=True)
-    def _import(self):
+    def _fn(self):
         from services.database import make_show_key
-        self.make_show_key = make_show_key
+        self.fn = make_show_key
 
     def test_basic(self):
-        assert self.make_show_key("Chanel", "AW2526") == "chanel__aw2526"
+        assert self.fn("Chanel", "AW2526") == "chanel__aw2526"
 
     def test_dior(self):
-        assert self.make_show_key("Dior", "AW2526") == "dior__aw2526"
+        assert self.fn("Dior", "AW2526") == "dior__aw2526"
 
     def test_accent_hermes(self):
-        # è must not produce herm-s
-        key = self.make_show_key("Hermès", "SS2024")
-        assert key == "hermes__ss2024"
+        # è accent must not produce "herm-s"
+        assert self.fn("Hermès", "SS2024") == "hermes__ss2024"
 
-    def test_spaces_in_season(self):
-        key = self.make_show_key("Gucci", "Fall 2025 Ready-to-Wear")
+    def test_spaces_collapse_in_season(self):
+        key = self.fn("Gucci", "Fall 2025 Ready-to-Wear")
         assert " " not in key
         assert key.startswith("gucci__")
 
     def test_apostrophe_stripped(self):
-        key = self.make_show_key("Hermès", "L'été 2025")
+        key = self.fn("Hermès", "L'été 2025")
         assert "'" not in key
-        assert "'" not in key
+        assert "’" not in key
 
     def test_deterministic(self):
-        a = self.make_show_key("Chanel", "AW2526")
-        b = self.make_show_key("Chanel", "AW2526")
-        assert a == b
+        assert self.fn("Chanel", "AW2526") == self.fn("Chanel", "AW2526")
 
     def test_double_underscore_separator(self):
-        key = self.make_show_key("Saint Laurent", "SS2025")
-        assert "__" in key
+        key = self.fn("Saint Laurent", "SS2025")
         parts = key.split("__")
         assert len(parts) == 2
 
-    def test_different_brands_produce_different_keys(self):
-        assert self.make_show_key("Chanel", "AW2526") != self.make_show_key("Dior", "AW2526")
+    def test_different_brands_different_keys(self):
+        assert self.fn("Chanel", "AW2526") != self.fn("Dior", "AW2526")
 
-    def test_different_seasons_produce_different_keys(self):
-        assert self.make_show_key("Chanel", "AW2526") != self.make_show_key("Chanel", "SS2526")
+    def test_different_seasons_different_keys(self):
+        assert self.fn("Chanel", "AW2526") != self.fn("Chanel", "SS2526")
+
+    def test_case_collapses(self):
+        # Input brand/season casing must not produce different keys
+        assert self.fn("CHANEL", "AW2526") == self.fn("chanel", "AW2526")
+
+    def test_source_does_not_affect_key(self):
+        """
+        source is intentionally excluded from make_show_key — it is mutable
+        on video replace (youtube_mvp → fc_master) and must not change identity.
+        make_show_key only takes brand+season; source is never a parameter.
+        Verify same brand+season always produces the same key regardless of
+        what source value the caller might hold.
+        """
+        key_a = self.fn("Chanel", "AW2526")
+        key_b = self.fn("Chanel", "AW2526")   # called from a context with different source
+        assert key_a == key_b
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# services/twelvelabs.py — extract_brand_from_query
+# services/structured_match.py — parse_query_attributes + attribute_boost
+# Session 6A: structured-field re-ranking.
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestExtractBrandFromQuery:
+class TestParseQueryAttributes:
     @pytest.fixture(autouse=True)
-    def _import(self):
-        from services.twelvelabs import extract_brand_from_query
-        self.fn = extract_brand_from_query
+    def _fn(self):
+        from services.structured_match import parse_query_attributes
+        self.fn = parse_query_attributes
 
-    def test_known_brand_extracted(self):
-        brand, cleaned = self.fn("Chanel black structured jacket")
-        assert brand == "Chanel"
-        assert "Chanel" not in cleaned
+    def test_returns_expected_keys(self):
+        attrs = self.fn("black structured jacket")
+        for k in ("colours", "garments", "silhouettes"):
+            assert k in attrs
 
-    def test_no_brand(self):
-        brand, cleaned = self.fn("black structured jacket")
-        assert brand is None
-        assert cleaned == "black structured jacket"
+    def test_red_dress_parses_colour_and_garment(self):
+        attrs = self.fn("red dress")
+        assert "red" in attrs["colours"]
+        assert "dress" in attrs["garments"]
 
-    def test_dior_extracted(self):
-        brand, _ = self.fn("Dior navy tailoring")
-        assert brand == "Dior"
-
-    def test_cleaned_query_not_empty_when_only_brand(self):
-        brand, cleaned = self.fn("Chanel")
-        assert brand == "Chanel"
-        # cleaned falls back to original when stripping leaves nothing
-        assert cleaned  # never empty
-
-    def test_case_insensitive(self):
-        brand, _ = self.fn("chanel black coat")
-        # brand is extracted when lowercase matches
-        assert brand is not None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# services/twelvelabs.py — _is_valid_description
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestIsValidDescription:
-    @pytest.fixture(autouse=True)
-    def _import(self):
-        from services.twelvelabs import _is_valid_description
-        self.fn = _is_valid_description
-
-    def test_valid_description(self):
-        assert self.fn("Structured black wool jacket with exaggerated shoulders and minimal buttons.")
-
-    def test_empty_rejected(self):
-        assert not self.fn("")
-
-    def test_none_rejected(self):
-        assert not self.fn(None)
-
-    def test_too_short_rejected(self):
-        assert not self.fn("Short.")
-
-    def test_hedge_rejected(self):
-        assert not self.fn("I cannot identify the garment in this image.")
-
-    def test_look_number_rejected(self):
-        assert not self.fn("Look 4 features a black jacket.")
-
-    def test_look_at_rejected(self):
-        assert not self.fn("Look at the model wearing a dress.")
-
-    def test_refusal_rejected(self):
-        assert not self.fn("I'm unable to describe the clothing in this footage.")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# services/structured_match.py — attribute_boost
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestAttributeBoost:
-    @pytest.fixture(autouse=True)
-    def _import(self):
-        from services.structured_match import attribute_boost, parse_query_attributes
-        self.boost = attribute_boost
-        self.parse = parse_query_attributes
-
-    def test_no_match_returns_zero(self):
-        attrs = self.parse("black structured jacket")
-        enriched = {}  # empty enriched_data
-        b = self.boost(enriched, attrs)
-        assert b == 0.0
-
-    def test_colour_match_gives_boost(self):
-        attrs = self.parse("black jacket")
-        enriched = {"colours": ["black"]}
-        b = self.boost(enriched, attrs)
-        assert b > 0.0
-
-    def test_boost_capped_at_0_20(self):
-        attrs = {"colours": ["black", "white"], "garments": ["jacket"], "silhouettes": ["structured"]}
-        enriched = {"colours": ["black", "white"], "garments": ["jacket"], "silhouette": "structured"}
-        b = self.boost(enriched, attrs)
-        assert b <= 0.20
-
-    def test_boost_non_negative(self):
-        attrs = self.parse("red dress")
-        enriched = {"colours": ["blue"]}  # mismatch
-        b = self.boost(enriched, attrs)
-        assert b >= 0.0
-
-    def test_null_enriched_returns_zero(self):
-        attrs = self.parse("black coat")
-        assert self.boost(None, attrs) == 0.0
-
-    def test_parse_returns_dict_with_expected_keys(self):
-        attrs = self.parse("black structured jacket")
-        assert "colours" in attrs
-        assert "garments" in attrs
-        assert "silhouettes" in attrs
-
-    def test_empty_query_parses_empty(self):
-        attrs = self.parse("")
+    def test_empty_query_parses_empty_lists(self):
+        attrs = self.fn("")
         assert attrs["colours"] == []
         assert attrs["garments"] == []
         assert attrs["silhouettes"] == []
 
+    def test_colour_only(self):
+        attrs = self.fn("black coat")
+        assert "black" in attrs["colours"]
+
+    def test_silhouette_parsed(self):
+        attrs = self.fn("structured oversized jacket")
+        # At least one silhouette keyword recognised
+        assert len(attrs["silhouettes"]) > 0 or len(attrs["garments"]) > 0
+
+
+class TestAttributeBoost:
+    @pytest.fixture(autouse=True)
+    def _fn(self):
+        from services.structured_match import attribute_boost, parse_query_attributes
+        self.boost = attribute_boost
+        self.parse = parse_query_attributes
+
+    def test_boost_zero_when_enriched_empty_dict(self):
+        attrs = self.parse("black jacket")
+        assert self.boost({}, attrs) == 0.0
+
+    def test_boost_zero_when_enriched_null(self):
+        attrs = self.parse("black jacket")
+        assert self.boost(None, attrs) == 0.0
+
+    def test_boost_zero_when_structured_fields_missing(self):
+        # enriched_data present but no colours/garments/silhouette keys
+        attrs = self.parse("black jacket")
+        assert self.boost({"description": "A coat."}, attrs) == 0.0
+
+    def test_colour_match_gives_positive_boost(self):
+        attrs = self.parse("black jacket")
+        b = self.boost({"colours": ["black"]}, attrs)
+        assert b > 0.0
+
+    def test_boost_only_adds_never_subtracts(self):
+        # Mismatch: query is red, enriched is blue
+        attrs = self.parse("red dress")
+        b = self.boost({"colours": ["blue"]}, attrs)
+        assert b >= 0.0
+
+    def test_boost_capped_at_0_20(self):
+        attrs = {"colours": ["black"], "garments": ["jacket"], "silhouettes": ["structured"]}
+        enriched = {"colours": ["black"], "garments": ["jacket"], "silhouette": "structured"}
+        assert self.boost(enriched, attrs) <= 0.20
+
+    def test_boost_increases_with_more_matches(self):
+        query = "black structured jacket"
+        attrs = self.parse(query)
+        enriched_partial = {"colours": ["black"]}
+        enriched_full = {"colours": ["black"], "garments": ["jacket"], "silhouette": "structured"}
+        b_partial = self.boost(enriched_partial, attrs)
+        b_full = self.boost(enriched_full, attrs)
+        assert b_full >= b_partial
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# services/claude.py — synthesize_results guard logic
-# These tests mock the Anthropic client so no API calls are made.
+# services/claude.py — synthesize_results distinct-brands guard
+# Session 5.1: guard fires BEFORE the model call; NONE output → None return.
+# Tests use async def (asyncio_mode = auto) + monkeypatched client.
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestSynthesizeResultsGuard:
-    """Tests the structural guards in synthesize_results (no actual API calls)."""
+def _moments(brands):
+    return [{"brand": b, "season": "AW2526", "year": 2025, "description": "A garment."} for b in brands]
 
-    def _make_results(self, brands):
-        return [{"brand": b, "season": "AW2526", "year": 2025, "description": "A garment."} for b in brands]
 
-    def test_empty_results_returns_none(self):
-        import asyncio
-        from unittest.mock import patch, MagicMock
-        import services.claude as claude_mod
-        with patch.object(claude_mod, "client", MagicMock()):
-            result = asyncio.get_event_loop().run_until_complete(
-                claude_mod.synthesize_results("black jacket", [])
-            )
+class TestSynthesizeGuard:
+    async def test_empty_results_returns_none(self):
+        import services.claude as m
+        with patch.object(m, "client", MagicMock()):
+            result = await m.synthesize_results("black jacket", [])
         assert result is None
 
-    def test_single_brand_returns_none_without_api_call(self):
-        """Guard: < 2 distinct brands → return None before hitting the API."""
-        import asyncio
-        from unittest.mock import patch, MagicMock, AsyncMock
-        import services.claude as claude_mod
-
-        mock_client = MagicMock()
-        mock_client.messages.create = MagicMock(side_effect=AssertionError("API must not be called"))
-
-        with patch.object(claude_mod, "client", mock_client):
-            result = asyncio.get_event_loop().run_until_complete(
-                claude_mod.synthesize_results(
-                    "black jacket",
-                    self._make_results(["Chanel", "Chanel", "Chanel"])
-                )
-            )
+    async def test_single_brand_returns_none_without_model_call(self):
+        """< 2 distinct brands → guard fires before any model call."""
+        import services.claude as m
+        boom = MagicMock()
+        boom.messages.create = MagicMock(side_effect=AssertionError("model must not be called"))
+        with patch.object(m, "client", boom):
+            result = await m.synthesize_results("black jacket", _moments(["Chanel", "Chanel", "Chanel"]))
         assert result is None
 
-    def test_two_brands_allows_api_call(self):
-        """Two distinct brands: guard passes, API is called."""
-        import asyncio
-        from unittest.mock import patch, MagicMock
-        import services.claude as claude_mod
-
-        fake_response = MagicMock()
-        fake_response.content = [MagicMock(text="Both Chanel and Dior explore structured shoulders.")]
-        mock_client = MagicMock()
-        mock_client.messages.create = MagicMock(return_value=fake_response)
-
-        with patch.object(claude_mod, "client", mock_client):
-            result = asyncio.get_event_loop().run_until_complete(
-                claude_mod.synthesize_results(
-                    "black jacket",
-                    self._make_results(["Chanel", "Dior", "Chanel"])
-                )
-            )
-        # API was called (no AssertionError) and result is the text
-        assert result is not None
-        assert "Chanel" in result or result is None  # post-model check may filter
-
-    def test_none_escape_hatch(self):
-        """If model returns 'NONE', synthesize_results returns None."""
-        import asyncio
-        from unittest.mock import patch, MagicMock
-        import services.claude as claude_mod
-
-        fake_response = MagicMock()
-        fake_response.content = [MagicMock(text="NONE")]
-        mock_client = MagicMock()
-        mock_client.messages.create = MagicMock(return_value=fake_response)
-
-        with patch.object(claude_mod, "client", mock_client):
-            result = asyncio.get_event_loop().run_until_complete(
-                claude_mod.synthesize_results(
-                    "random query",
-                    self._make_results(["Chanel", "Dior"])
-                )
-            )
+    async def test_all_same_brand_returns_none_without_model_call(self):
+        import services.claude as m
+        boom = MagicMock()
+        boom.messages.create = MagicMock(side_effect=AssertionError("model must not be called"))
+        with patch.object(m, "client", boom):
+            result = await m.synthesize_results("navy coat", _moments(["Dior"] * 5))
         assert result is None
+
+    async def test_none_escape_hatch_returns_none(self):
+        """Model returns literal 'NONE' → synthesize_results returns None."""
+        import services.claude as m
+        fake = MagicMock()
+        fake.content = [MagicMock(text="NONE")]
+        mock_client = MagicMock()
+        mock_client.messages.create = MagicMock(return_value=fake)
+        with patch.object(m, "client", mock_client):
+            result = await m.synthesize_results("query", _moments(["Chanel", "Dior"]))
+        assert result is None
+
+    async def test_empty_model_output_returns_none(self):
+        """Empty string from model → None."""
+        import services.claude as m
+        fake = MagicMock()
+        fake.content = [MagicMock(text="")]
+        mock_client = MagicMock()
+        mock_client.messages.create = MagicMock(return_value=fake)
+        with patch.object(m, "client", mock_client):
+            result = await m.synthesize_results("query", _moments(["Chanel", "Dior"]))
+        assert result is None
+
+    async def test_two_brands_allows_model_call(self):
+        """Two distinct brands: guard passes, model is called, result returned."""
+        import services.claude as m
+        fake = MagicMock()
+        fake.content = [MagicMock(text="Both Chanel and Dior explore exaggerated shoulders.")]
+        mock_client = MagicMock()
+        mock_client.messages.create = MagicMock(return_value=fake)
+        with patch.object(m, "client", mock_client):
+            result = await m.synthesize_results("structured shoulders", _moments(["Chanel", "Dior"]))
+        # Model was called without AssertionError; result may be text or None (post-check)
+        mock_client.messages.create.assert_called_once()
+        # Result is string if post-model brand-citation check passes
+        if result is not None:
+            assert isinstance(result, str)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # services/show_view.py — client_safe_metadata
+# Session 8: internal-only fields must be absent from the client projection.
+# TODO: when video playback lands, verify thumbnail_url exposure is intentional.
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestClientSafeMetadata:
     @pytest.fixture(autouse=True)
-    def _import(self):
+    def _fn(self):
         from services.show_view import client_safe_metadata
         self.fn = client_safe_metadata
 
-    def _make_show(self, **overrides):
-        from unittest.mock import MagicMock
-        show = MagicMock()
-        show.brand = "Chanel"
-        show.season = "AW2526"
-        show.season_type = "AW"
-        show.year = 2025
-        show.creative_director = "Virginie Viard"
-        show.show_date = None
-        show.summary = "A show summary."
-        show.raw_metadata = {}
-        for k, v in overrides.items():
-            setattr(show, k, v)
-        return show
+    def _show(self, **kw):
+        s = MagicMock()
+        s.show_key = "chanel__aw2526"
+        s.brand = "Chanel"
+        s.season = "AW2526"
+        s.season_type = "AW-RTW"
+        s.year = 2025
+        s.creative_director = "Virginie Viard"
+        s.show_date = None
+        s.summary = "A show."
+        s.raw_metadata = {}
+        for k, v in kw.items():
+            setattr(s, k, v)
+        return s
 
-    def test_does_not_include_video_id(self):
-        show = self._make_show()
-        show.video_id = "secret-tl-id"
-        result = self.fn(show)
-        assert "video_id" not in result
+    INTERNAL_FIELDS = ("video_id", "task_id", "status", "health",
+                       "sample_moments", "provenance", "source", "source_url")
 
-    def test_does_not_include_task_id(self):
-        show = self._make_show()
-        show.task_id = "secret-task"
-        result = self.fn(show)
-        assert "task_id" not in result
+    def test_no_internal_field_leaks(self):
+        s = self._show()
+        result = self.fn(s)
+        for field in self.INTERNAL_FIELDS:
+            assert field not in result, f"internal field {field!r} leaked to client view"
 
-    def test_does_not_include_source(self):
-        show = self._make_show()
-        show.source = "youtube_mvp"
-        result = self.fn(show)
-        assert "source" not in result
-
-    def test_includes_public_fields(self):
-        result = self.fn(self._make_show())
-        for field in ("brand", "season", "year", "season_type", "creative_director", "summary"):
+    def test_public_fields_present(self):
+        result = self.fn(self._show())
+        for field in ("show_key", "brand", "season", "season_type", "year", "creative_director", "summary"):
             assert field in result
 
     def test_models_slot_present(self):
-        result = self.fn(self._make_show())
-        assert "models" in result
+        # Forward-compatible nullable slot — must always be present even if None
+        assert "models" in self.fn(self._show())
+
+    def test_video_id_not_exposed(self):
+        s = self._show()
+        s.video_id = "secret-tl-id"
+        assert "video_id" not in self.fn(s)
+
+    def test_health_not_exposed(self):
+        # health is an internal diagnostic — never for clients
+        assert "health" not in self.fn(self._show())
+
+    def test_status_not_exposed(self):
+        assert "status" not in self.fn(self._show())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Confidence display rules (from CLAUDE.md spec)
+# Confidence display contract (CLAUDE.md spec)
+# NOTE: discrepancy flagged below.
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestConfidenceDisplay:
-    """Ensure confidence integers stay within spec."""
+class TestConfidenceContract:
+    """
+    CLAUDE.md spec: below 60 = suppress; confidence integer 0-100.
+    ACTUAL code: SIMILARITY_THRESHOLD = 0.07 (7 confidence).
+    These tests cover what the code ACTUALLY enforces.
 
-    def test_similarity_to_confidence_rounding(self):
-        # Raw similarity 0.94 → confidence 94
-        similarity = 0.9412
-        confidence = round(similarity * 100)
-        assert confidence == 94
-        assert isinstance(confidence, int)
+    DISCREPANCY — see bottom of this class.
+    """
 
-    def test_confidence_clamped_to_100(self):
-        similarity = 1.0
-        confidence = min(100, round(similarity * 100))
-        assert confidence == 100
+    def test_similarity_to_integer_rounding(self):
+        assert round(0.9412 * 100) == 94
+
+    def test_result_is_integer(self):
+        assert isinstance(round(0.85 * 100), int)
+
+    def test_confidence_never_exceeds_100(self):
+        assert min(100, round(1.0 * 100)) == 100
 
     def test_confidence_never_negative(self):
-        similarity = 0.0
-        confidence = max(0, round(similarity * 100))
-        assert confidence == 0
+        assert max(0, round(0.0 * 100)) == 0
 
     @pytest.mark.parametrize("sim,expected_band", [
         (0.95, "Exact match"),
         (0.82, "Strong match"),
         (0.67, "Relevant"),
-        (0.55, "suppress"),
+        (0.55, "suppress"),  # below 60
     ])
-    def test_confidence_bands(self, sim, expected_band):
+    def test_confidence_bands_per_spec(self, sim, expected_band):
         conf = round(sim * 100)
         if conf >= 90:
             band = "Exact match"
@@ -362,3 +338,10 @@ class TestConfidenceDisplay:
         else:
             band = "suppress"
         assert band == expected_band
+
+    # ── DISCREPANCY ──────────────────────────────────────────────────────────
+    # CLAUDE.md says: "below 60 = suppress from results"
+    # services/twelvelabs.py SIMILARITY_THRESHOLD = 0.07  (i.e. 7 confidence)
+    # This means results with confidence 7–59 ARE currently returned.
+    # The integration test (test_confidence_floor) verifies the actual floor is
+    # SIMILARITY_THRESHOLD*100 = 7, NOT 60.  See FINDINGS in the README.

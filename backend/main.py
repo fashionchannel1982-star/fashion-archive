@@ -117,12 +117,20 @@ async def get_shows():
 
 
 @app.get("/api/shows/{ident}")
-async def get_show_detail(ident: str, view: str = "internal"):
+async def get_show_detail(ident: str, view: str = "client"):
     """
-    Internal metadata endpoint — ops/tooling only.
+    Show metadata endpoint.
     Resolves by show.id first, then show_key.
-    ?view=internal (default) — full metadata + health + sample moments.
-    ?view=client — curated client-safe subset only (no operational fields).
+
+    Default (?view=client): curated public subset — no operational fields.
+      Fields: brand, season, season_type, year, creative_director, models,
+              show_date, summary, show_key.
+
+    ?view=internal: full ops metadata including video_id, task_id, health,
+      sample_moments. For tooling/scripts only — never expose to the frontend.
+
+    Security posture is fail-closed: the default NEVER includes video_id,
+    task_id, health, or sample_moments.
     """
     from services.database import AsyncSessionLocal, Show, Moment
     from services.show_view import internal_metadata, client_safe_metadata
@@ -140,21 +148,20 @@ async def get_show_detail(ident: str, view: str = "internal"):
         if show is None:
             raise HTTPException(status_code=404, detail=f"Show not found: {ident!r}")
 
-        if view == "client":
-            return client_safe_metadata(show)
+        if view == "internal":
+            # Internal view: load moments and provenance
+            moments = (await session.execute(
+                select(Moment).where(Moment.show_id == show.id).order_by(Moment.look_number)
+            )).scalars().all()
 
-        # Internal view: load moments and provenance
-        moments = (await session.execute(
-            select(Moment).where(Moment.show_id == show.id).order_by(Moment.look_number)
-        )).scalars().all()
+            from sqlalchemy.orm import selectinload
+            show_with_prov = (await session.execute(
+                select(Show).where(Show.id == show.id).options(selectinload(Show.provenance))
+            )).scalar_one()
+            return internal_metadata(show_with_prov, moments)
 
-        # Eagerly load provenance relationship
-        from sqlalchemy.orm import selectinload
-        show_with_prov = (await session.execute(
-            select(Show).where(Show.id == show.id).options(selectinload(Show.provenance))
-        )).scalar_one()
-
-        return internal_metadata(show_with_prov, moments)
+        # Default: client-safe projection — no operational fields
+        return client_safe_metadata(show)
 
 
 # ─────────────────────────────────────────

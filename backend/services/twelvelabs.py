@@ -19,8 +19,33 @@ import logging
 logger = logging.getLogger(__name__)
 
 TWELVE_LABS_BASE_URL = "https://api.twelvelabs.io/v1.3"
-API_KEY = os.getenv("TWELVE_LABS_API_KEY")
 INDEX_ID = os.getenv("TWELVE_LABS_INDEX_ID")
+
+# Keep a module-level reference for backwards compatibility (may be None at import time).
+# Always access via _get_api_key() at call time so that:
+#   (a) dotenv loaded after import still works, and
+#   (b) a missing key raises a clear error instead of crashing httpx on None.encode().
+API_KEY = os.getenv("TWELVE_LABS_API_KEY")
+
+
+def _get_api_key() -> str:
+    key = os.getenv("TWELVE_LABS_API_KEY") or API_KEY
+    if not key:
+        raise RuntimeError(
+            "TWELVE_LABS_API_KEY is not set. "
+            "Add it to backend/.env or export it before starting the server."
+        )
+    return key
+
+
+def _get_index_id() -> str:
+    idx = os.getenv("TWELVE_LABS_INDEX_ID") or INDEX_ID
+    if not idx:
+        raise RuntimeError(
+            "TWELVE_LABS_INDEX_ID is not set. "
+            "Add it to backend/.env after running the first ingest."
+        )
+    return idx
 
 # Minimum cosine similarity to include a result.
 # Marengo3.0 text↔image cross-modal similarity clusters 0.06–0.14 for fashion queries.
@@ -57,7 +82,7 @@ def extract_brand_from_query(query: str):
 
 def get_headers() -> dict:
     return {
-        "x-api-key": API_KEY,
+        "x-api-key": _get_api_key(),
         "Content-Type": "application/json",
     }
 
@@ -164,7 +189,7 @@ async def ingest_local_file(file_path: str, metadata: dict) -> str:
 
     # Twelve Labs multipart upload — do NOT include Content-Type in headers
     # httpx sets the correct multipart boundary automatically
-    upload_headers = {"x-api-key": API_KEY}
+    upload_headers = {"x-api-key": _get_api_key()}
 
     with open(file_path, "rb") as f:
         upload_timeout = max(300.0, file_size / (1024 * 1024) * 3)  # ~3s per MB, min 5 min
@@ -320,7 +345,7 @@ async def embed_text(text: str) -> Optional[list]:
     async with httpx.AsyncClient(timeout=20.0) as client:
         r = await client.post(
             f"{TWELVE_LABS_BASE_URL}/embed",
-            headers={"x-api-key": API_KEY, "Content-Type": f"multipart/form-data; boundary={boundary}"},
+            headers={"x-api-key": _get_api_key(), "Content-Type": f"multipart/form-data; boundary={boundary}"},
             content=body,
         )
         if r.status_code != 200:
@@ -346,7 +371,7 @@ async def embed_image(image_bytes: bytes) -> Optional[list]:
     async with httpx.AsyncClient(timeout=20.0) as client:
         r = await client.post(
             f"{TWELVE_LABS_BASE_URL}/embed",
-            headers={"x-api-key": API_KEY, "Content-Type": f"multipart/form-data; boundary={boundary}"},
+            headers={"x-api-key": _get_api_key(), "Content-Type": f"multipart/form-data; boundary={boundary}"},
             content=body,
         )
         if r.status_code != 200:
@@ -437,7 +462,7 @@ async def semantic_search(
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
             f"{TWELVE_LABS_BASE_URL}/search",
-            headers={"x-api-key": API_KEY},
+            headers={"x-api-key": _get_api_key()},
             files=files,
         )
         response.raise_for_status()
@@ -454,7 +479,7 @@ async def semantic_search(
             try:
                 r = await client.get(
                     f"{TWELVE_LABS_BASE_URL}/indexes/{INDEX_ID}/videos/{vid}",
-                    headers={"x-api-key": API_KEY},
+                    headers={"x-api-key": _get_api_key()},
                 )
                 if r.status_code == 200:
                     thumb_list = r.json().get("hls", {}).get("thumbnail_urls", [])
@@ -498,7 +523,7 @@ async def _search_clips_for_video(video_id: str, query: str, page_limit: int = 5
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
             f"{TWELVE_LABS_BASE_URL}/search",
-            headers={"x-api-key": API_KEY},
+            headers={"x-api-key": _get_api_key()},
             files=_multipart_fields(
                 index_id=INDEX_ID,
                 query_text=query,
@@ -527,7 +552,7 @@ async def delete_video(video_id: str) -> bool:
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.delete(
             f"{TWELVE_LABS_BASE_URL}/indexes/{INDEX_ID}/videos/{video_id}",
-            headers={"x-api-key": API_KEY},
+            headers={"x-api-key": _get_api_key()},
         )
     if r.status_code in (200, 204):
         logger.info(f"TL video deleted (task endpoint): {video_id}")
@@ -540,7 +565,7 @@ async def delete_video(video_id: str) -> bool:
         async with httpx.AsyncClient(timeout=30) as client:
             r2 = await client.delete(
                 f"{TWELVE_LABS_BASE_URL}/indexes/{INDEX_ID}/indexed-assets/{video_id}",
-                headers={"x-api-key": API_KEY},
+                headers={"x-api-key": _get_api_key()},
             )
         if r2.status_code in (200, 204):
             logger.info(f"TL video deleted (indexed-assets endpoint): {video_id}")
@@ -559,7 +584,7 @@ async def get_hls_url(video_id: str) -> Optional[str]:
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.get(
             f"{TWELVE_LABS_BASE_URL}/indexes/{INDEX_ID}/videos/{video_id}",
-            headers={"x-api-key": API_KEY},
+            headers={"x-api-key": _get_api_key()},
         )
         if r.status_code != 200:
             return None

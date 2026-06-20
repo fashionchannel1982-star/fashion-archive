@@ -146,6 +146,7 @@ def client_safe_metadata(show) -> dict:
     This is the ONLY function that should populate a client-facing response.
     """
     return {
+        "show_key": show.show_key,
         "brand": show.brand,
         "season": show.season,
         "season_type": show.season_type,

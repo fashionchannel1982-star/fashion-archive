@@ -39,8 +39,8 @@ async def list_tl_videos() -> list[dict]:
     async with httpx.AsyncClient(timeout=30) as client:
         while True:
             r = await client.get(
-                f"{tl.TWELVE_LABS_BASE_URL}/indexes/{tl.INDEX_ID}/videos",
-                headers={"x-api-key": tl.API_KEY},
+                f"{tl.TWELVE_LABS_BASE_URL}/indexes/{tl._get_index_id()}/videos",
+                headers={"x-api-key": tl._get_api_key()},
                 params={"page": page, "page_limit": page_limit},
             )
             if r.status_code != 200:
@@ -55,39 +55,49 @@ async def list_tl_videos() -> list[dict]:
     return videos
 
 
-async def main() -> None:
-    print("=" * 60)
-    print("TL ↔ DB SYNC REPORT")
-    print("=" * 60)
-
-    # Fetch TL index
-    print("Fetching TL index…", end=" ", flush=True)
+async def check_sync() -> tuple:
+    """
+    Importable core: returns (orphans, ghosts) as sets of video_id strings.
+    orphans — in TL but no matching ready show in DB (pollute search).
+    ghosts  — ready shows whose video_id is absent from TL (return 0 results).
+    """
     tl_videos = await list_tl_videos()
     tl_video_ids = {v["_id"] for v in tl_videos}
-    print(f"{len(tl_videos)} videos found")
 
-    # Fetch ready shows from DB
     async with AsyncSessionLocal() as session:
         rows = (await session.execute(
             select(Show.id, Show.brand, Show.season, Show.video_id, Show.show_key, Show.source)
             .where(Show.status == "ready")
         )).all()
 
-    db_video_map = {}  # video_id → show row
-    for show_id, brand, season, video_id, show_key, source in rows:
-        if video_id:
-            db_video_map[video_id] = (show_id, brand, season, show_key, source)
+    db_video_ids = {video_id for _, _, _, video_id, _, _ in rows if video_id}
 
-    db_video_ids = set(db_video_map.keys())
-
-    # (a) TL orphans: in TL but not in DB
     orphans = tl_video_ids - db_video_ids
-    # (b) DB ghosts: in DB but not in TL
     ghosts = db_video_ids - tl_video_ids
+    return orphans, ghosts
+
+
+async def main() -> None:
+    print("=" * 60)
+    print("TL ↔ DB SYNC REPORT")
+    print("=" * 60)
+
+    print("Fetching TL index…", end=" ", flush=True)
+    tl_videos = await list_tl_videos()
+    print(f"{len(tl_videos)} videos found")
+
+    orphans, ghosts = await check_sync()
+
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(
+            select(Show.id, Show.brand, Show.season, Show.video_id, Show.show_key, Show.source)
+            .where(Show.status == "ready")
+        )).all()
+    db_video_map = {video_id: (sid, br, se, sk, so) for sid, br, se, video_id, sk, so in rows if video_id}
 
     print()
-    print(f"DB ready shows with video_id: {len(db_video_ids)}")
-    print(f"TL index videos:              {len(tl_video_ids)}")
+    print(f"DB ready shows with video_id: {len(db_video_map)}")
+    print(f"TL index videos:              {len({v['_id'] for v in tl_videos})}")
     print()
 
     if orphans:

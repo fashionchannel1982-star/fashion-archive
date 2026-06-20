@@ -4,11 +4,18 @@ Requires the live backend at localhost:8000 (auto-skipped if not running).
 Start with: cd backend && uvicorn main:app --port 8000
 
 Run all integration tests: pytest -m integration -v
-Run with unit tests:        pytest -v
+Run everything:             pytest -v
+
+NOTE: confidence_floor test asserts >= 7 (SIMILARITY_THRESHOLD*100), NOT >= 60.
+See tests/README.md FINDINGS section for the threshold discrepancy.
 """
 
+import sys
+import os
 import pytest
 import httpx
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 BASE = "http://localhost:8000"
 
@@ -31,20 +38,54 @@ def test_health(client):
 
 # ── /api/search ────────────────────────────────────────────────────────────
 
-def test_search_happy_path(client):
-    r = client.post("/api/search", json={"query": "black structured jacket", "limit": 5})
+def test_search_multi_word_concept_query(client):
+    """Multi-word concept query → 200, well-formed result dicts with required fields."""
+    r = client.post("/api/search", json={"query": "black structured jacket exaggerated shoulders", "limit": 5})
     assert r.status_code == 200
     body = r.json()
     assert "results" in body
     assert "total" in body
     assert "processing_time_ms" in body
-    assert isinstance(body["results"], list)
     assert body["total"] == len(body["results"])
     for result in body["results"]:
-        assert "moment_id" in result
-        assert "brand" in result
-        assert "confidence" in result
+        for field in ("moment_id", "brand", "season", "year", "confidence",
+                      "timestamp_start", "timestamp_end", "description", "season_type"):
+            assert field in result, f"missing field {field!r} in result"
         assert isinstance(result["confidence"], int)
+
+
+def test_search_confidence_floor(client):
+    """
+    All returned confidences must be >= SIMILARITY_THRESHOLD * 100 = 7.
+
+    DISCREPANCY: CLAUDE.md spec says 'below 60 = suppress', but the actual
+    code uses SIMILARITY_THRESHOLD = 0.07 (7 confidence). This test asserts
+    what the code ACTUALLY enforces. See tests/README.md FINDINGS.
+    """
+    from services.twelvelabs import SIMILARITY_THRESHOLD
+    floor = round(SIMILARITY_THRESHOLD * 100)
+    r = client.post("/api/search", json={"query": "dress coat jacket", "limit": 50})
+    assert r.status_code == 200
+    for result in r.json()["results"]:
+        assert result["confidence"] >= floor, (
+            f"confidence {result['confidence']} is below floor {floor} "
+            f"(SIMILARITY_THRESHOLD={SIMILARITY_THRESHOLD})"
+        )
+
+
+def test_search_single_brand_query_synthesis_null(client):
+    """
+    A query mentioning only one brand (bare brand name) should produce synthesis=None
+    because the guard requires ≥2 distinct brands in the top results.
+    This test is probabilistic — if top results happen to contain 2+ brands,
+    synthesis may be non-null. We assert the field is present and well-typed.
+    """
+    r = client.post("/api/search", json={"query": "Chanel", "limit": 3})
+    assert r.status_code == 200
+    body = r.json()
+    assert "synthesis" in body
+    # synthesis is either None or a string — never an unexpected type
+    assert body["synthesis"] is None or isinstance(body["synthesis"], str)
 
 
 def test_search_empty_query_rejected(client):
@@ -87,15 +128,14 @@ def test_search_confidence_integers(client):
         assert 0 <= result["confidence"] <= 100
 
 
-def test_search_synthesis_field_present(client):
-    """synthesis key must always be present, even when None."""
+def test_search_synthesis_field_always_present(client):
+    """synthesis key must always be present in the response, even when None."""
     r = client.post("/api/search", json={"query": "tailored coat", "limit": 5})
     assert r.status_code == 200
     assert "synthesis" in r.json()
 
 
-def test_search_season_type_present(client):
-    """season_type must be present on every result."""
+def test_search_season_type_on_every_result(client):
     r = client.post("/api/search", json={"query": "dress", "limit": 5})
     assert r.status_code == 200
     for result in r.json()["results"]:
@@ -113,7 +153,7 @@ def test_shows_list(client):
     assert len(body["shows"]) > 0
 
 
-def test_shows_list_fields(client):
+def test_shows_list_required_fields(client):
     r = client.get("/api/shows")
     for show in r.json()["shows"]:
         for field in ("id", "brand", "season", "year", "show_key", "status"):
@@ -125,8 +165,7 @@ def test_shows_detail_by_key(client):
     key = shows[0]["show_key"]
     r = client.get(f"/api/shows/{key}")
     assert r.status_code == 200
-    body = r.json()
-    assert body["show_key"] == key
+    assert r.json()["show_key"] == key
 
 
 def test_shows_detail_not_found(client):
@@ -134,27 +173,34 @@ def test_shows_detail_not_found(client):
     assert r.status_code == 404
 
 
-def test_shows_internal_view_blocked_without_param(client):
-    """Internal view fields must not leak in the default response."""
+def test_shows_internal_fields_not_in_default_view(client):
+    """Internal ops fields must not leak in the default (client) response."""
     shows = client.get("/api/shows").json()["shows"]
     key = shows[0]["show_key"]
     body = client.get(f"/api/shows/{key}").json()
-    for sensitive in ("video_id", "task_id", "health", "sample_moments"):
-        assert sensitive not in body, f"internal field {sensitive!r} leaked to client view"
+    for field in ("video_id", "task_id", "health", "sample_moments"):
+        assert field not in body, f"internal field {field!r} leaked to client view"
 
 
 # ── /api/timeline ──────────────────────────────────────────────────────────
 
-def test_timeline_shape(client):
+def test_timeline_default_shape(client):
     r = client.get("/api/timeline")
     assert r.status_code == 200
     body = r.json()
-    assert "house" in body
-    assert "season_type" in body
-    assert "points" in body
-    assert "total" in body
+    for field in ("house", "season_type", "points", "total"):
+        assert field in body
     assert isinstance(body["points"], list)
     assert body["total"] == len(body["points"])
+
+
+def test_timeline_chanel_returns_points(client):
+    """Chanel has ingested seasons — must return at least one point."""
+    r = client.get("/api/timeline?house=Chanel")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["house"] == "Chanel"
+    assert len(body["points"]) > 0, "Chanel timeline returned no points — check DB has Chanel shows"
 
 
 def test_timeline_with_code(client):
@@ -194,3 +240,30 @@ def test_admin_events_shape(client):
         evt = body["recent"][0]
         assert "event_type" in evt
         assert "created_at" in evt
+
+
+# ── verify_tl_sync (importable core) ───────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_tl_sync_clean():
+    """
+    Verify the TL index has 0 orphans and 0 ghosts.
+    Uses check_sync() — the importable core of scripts/verify_tl_sync.py.
+
+    Skips (not fails) when TWELVE_LABS_API_KEY is unset — same posture as
+    the stack-down skip. Missing key is an environment problem, not a code
+    regression; a hard fail here would block CI on machines without the key.
+    """
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+    api_key = os.getenv("TWELVE_LABS_API_KEY")
+    if not api_key:
+        pytest.skip("TWELVE_LABS_API_KEY not set — skipping TL sync check")
+
+    from verify_tl_sync import check_sync
+    orphans, ghosts = await check_sync()
+    assert len(orphans) == 0, f"TL orphans found — polluting search: {orphans}"
+    assert len(ghosts) == 0, f"DB ghosts found — shows with no TL video: {ghosts}"
