@@ -1,0 +1,293 @@
+# Fashion Archive — Golden Query Set
+# ------------------------------------
+# validated: true  → label confirmed by Fengze; counts in the locked baseline.
+# validated: false → candidate label; excluded from baseline numbers.
+# pending_review: true → structurally ambiguous; explicitly excluded from baseline.
+#
+# PROVISIONAL LOCKED BASELINE — run after Phase F-A label decisions.
+# Note: provisional pending #6, #8 (pending_review) and #7-Burberry confirmation.
+#
+# expect: show_keys that SHOULD appear in top-5. Ground truth, not pipeline mirrors.
+#         P@5 = fraction of top-5 that match expected.
+#         R@5 = fraction of expected found in top-5.
+#         hit@5 = 1 if any expected show appears.
+#
+# kind:
+#   brand      — query names a house or designer explicitly
+#   concept    — abstract aesthetic / theme (no house name)
+#   attribute  — specific garment + colour + silhouette detail
+#   historical — archival / era-specific query
+#   metadata   — structural year/brand/season filter (Phase F)
+
+queries:
+
+  # ── BRAND queries ──────────────────────────────────────────────────────────
+
+  - query: "Chanel tweed blazer"
+    expect:
+      - chanel__spring-1993-ready-to-wear
+      - chanel__fall-2000-ready-to-wear
+      - chanel__aw2016
+    kind: brand
+    validated: true
+    notes: >
+      KEEP LABEL, ACCEPT LOW SCORE. Archival Chanel shows are ground truth for tweed.
+      Pipeline may surface modern AW shows; that is an honest recall gap, not a label
+      error. Spring 1993 and Fall 2000 are the richest archival tweed sources.
+
+  - query: "Dior feminine tailoring"
+    expect:
+      - dior__fall-2024-ready-to-wear
+      - dior__spring-2025-ready-to-wear
+      - dior__spring-2024-ready-to-wear
+    kind: brand
+    validated: true
+    notes: >
+      All three Dior RTW shows confirmed. Pipeline agrees exactly.
+
+  - query: "Vivienne Westwood corset"
+    expect:
+      - vivienne-westwood__fall-1993-ready-to-wear
+    kind: brand
+    validated: true
+    notes: >
+      Fall 1993 RtW confirmed with metallic bustier/conical corset content.
+      fall-2025 also surfaces (conf 67) but archival 1993 is the primary truth.
+
+  - query: "Maison Margiela deconstructed couture"
+    expect:
+      - maison-margiela__fall-2025-couture
+    kind: brand
+    validated: true
+    notes: >
+      Only one Margiela show in corpus; pipeline confirms.
+
+  - query: "Valentino dramatic gown"
+    expect:
+      - valentino__fall-2025-ready-to-wear
+    kind: brand
+    validated: true
+    notes: >
+      Only one Valentino show; pipeline confirms.
+
+  # ── CONCEPT queries ─────────────────────────────────────────────────────────
+
+  - query: "structured shoulders power dressing"
+    expect:
+      - alexander-mcqueen__fall-2025-ready-to-wear
+      - versace__fall-2025-ready-to-wear
+      - balenciaga__fall-2025-ready-to-wear
+    kind: concept
+    validated: false
+    pending_review: true
+    notes: >
+      PENDING — Fengze to rule whether expected houses are corpus-truth or the ranking
+      shows the true best examples. Pipeline returns Jacquemus, Chanel AW2022 instead.
+      McQueen/Versace/Balenciaga are strong candidate houses but may not dominate in
+      the embeddings. Exclude from baseline until resolved.
+
+  - query: "sheer black eveningwear"
+    expect:
+      - alexander-mcqueen__fall-2025-ready-to-wear
+      - saint-laurent__fall-2025-ready-to-wear
+    kind: concept
+    validated: true
+    notes: >
+      McQueen and Saint Laurent are ground-truth houses for sheer black evening.
+      Pipeline also surfaces Burberry (conf 89) — pending: consider adding Burberry
+      if Fengze confirms that clip is genuinely sheer black eveningwear.
+
+  - query: "voluminous draping avant-garde"
+    expect:
+      - issey-miyake__fall-2025-ready-to-wear
+      - rick-owens__fall-2025-ready-to-wear
+      - loewe__fall-2025-ready-to-wear
+    kind: concept
+    validated: false
+    pending_review: true
+    notes: >
+      PENDING — Fengze to rule whether expected houses are corpus-truth or the ranking
+      shows the true best examples. Pipeline surfaces Chanel Fall 2025 and Margiela
+      instead. Issey/Rick/Loewe are the canonical avant-garde volume houses but may
+      not dominate in embeddings. Exclude from baseline until resolved.
+
+  - query: "monochrome minimalism"
+    expect:
+      - jil-sander__fall-2026-ready-to-wear
+      - celine__fall-2025-ready-to-wear
+      - prada__fall-2025-ready-to-wear
+    kind: concept
+    validated: true
+    notes: >
+      KEEP LABEL, ACCEPT LOW SCORE. Jil Sander, Celine, Prada are the canonical
+      minimalist houses. Pipeline only returns 3 results (Rick Owens, Jil Sander)
+      — Celine and Prada absent is an honest recall gap.
+
+  - query: "fur and texture maximalism"
+    expect:
+      - gucci__fall-2025-ready-to-wear
+      - loewe__fall-2025-ready-to-wear
+      - fendi__fall-2025-ready-to-wear
+    kind: concept
+    validated: true
+    notes: >
+      FIX: Added Fendi (conf 96, confirmed by pipeline) to expected. Kept Gucci and
+      Loewe. Vivienne Westwood also surfaces but not the canonical maximalism house.
+
+  - query: "pearl accessories and classic femininity"
+    expect:
+      - chanel__aw2016
+      - chanel__spring-1993-ready-to-wear
+      - chanel__fall-2000-ready-to-wear
+    kind: concept
+    validated: true
+    notes: >
+      Pipeline agrees exactly. AW2016 corpus explicitly mentions pearl necklaces.
+
+  - query: "black leather jacket and boots"
+    expect:
+      - saint-laurent__fall-2025-ready-to-wear
+      - versace__fall-2025-ready-to-wear
+      - balenciaga__fall-2025-ready-to-wear
+    kind: concept
+    validated: true
+    notes: >
+      KEEP LABEL, ACCEPT LOW SCORE. Saint Laurent, Versace, Balenciaga are the ground-
+      truth houses for rock-edge leather looks. Pipeline surfaces Chanel 2011, Fendi,
+      Burberry instead — honest recall gap. Only Versace appears in pipeline top-5.
+
+  # ── ATTRIBUTE queries ───────────────────────────────────────────────────────
+
+  - query: "scarlet red tailoring"
+    expect:
+      - valentino__fall-2025-ready-to-wear
+      - versace__fall-2025-ready-to-wear
+      - givenchy__fall-2025-ready-to-wear
+    kind: attribute
+    validated: true
+    notes: >
+      KEEP LABEL, ACCEPT LOW SCORE. Valentino/Versace/Givenchy are the colour-forward
+      houses for red tailoring. Pipeline surfaces Vivienne Westwood and McQueen instead
+      — honest recall gap, not a label error.
+
+  - query: "red dress"
+    expect:
+      - valentino__fall-2025-ready-to-wear
+      - versace__fall-2025-ready-to-wear
+      - balenciaga__fall-2025-ready-to-wear
+    kind: attribute
+    validated: true
+    notes: >
+      Valentino and Balenciaga confirmed by pipeline. Versace absent from top-5
+      (honest gap). Expected unchanged.
+
+  - query: "sculptural architectural pleating"
+    expect:
+      - issey-miyake__fall-2025-ready-to-wear
+      - maison-margiela__fall-2025-couture
+    kind: attribute
+    validated: true
+    notes: >
+      Issey Miyake confirmed by pipeline (conf 75). Margiela absent from top-5
+      (honest gap). Only 4 results pass confidence floor.
+
+  - query: "oversized coat exaggerated lapels"
+    expect:
+      - bottega-veneta__fall-2026-ready-to-wear
+      - balenciaga__fall-2025-ready-to-wear
+      - rick-owens__fall-2025-ready-to-wear
+    kind: attribute
+    validated: true
+    notes: >
+      Bottega Veneta (conf 93) and Balenciaga (conf 90) confirmed by pipeline.
+      Rick Owens absent (honest gap; Vivienne Westwood intrudes instead).
+
+  - query: "gold hardware embellishment evening"
+    expect:
+      - versace__fall-2025-ready-to-wear
+      - valentino__fall-2025-ready-to-wear
+      - chanel__fall-2024-couture
+    kind: attribute
+    validated: true
+    notes: >
+      KEEP LABEL, ACCEPT LOW SCORE. Versace/Valentino/Chanel couture are the gold-
+      hardware houses. Pipeline returns only chanel__fall-2024-couture (1 result, conf
+      78) — Versace and Valentino absent. Honest recall gap.
+
+  # ── HISTORICAL queries ──────────────────────────────────────────────────────
+
+  - query: "Chanel 90s archival tweed suit"
+    expect:
+      - chanel__spring-1993-ready-to-wear
+      - chanel__fall-2000-ready-to-wear
+    kind: historical
+    validated: true
+    notes: >
+      KEEP LABEL, ACCEPT LOW SCORE. Spring 1993 and Fall 2000 are the correct archival
+      references. Pipeline surfaces chanel__fall-2024-couture at top (false positive)
+      and both expected shows in positions 2–3. Honest precision gap.
+
+  - query: "Westwood 1993 punk corset"
+    expect:
+      - vivienne-westwood__fall-1993-ready-to-wear
+    kind: historical
+    validated: true
+    notes: >
+      Only one Westwood 1993 show. Pipeline confirms (conf 65, hybrid). Only 1 result.
+
+  - query: "Karl Lagerfeld era Chanel bouclé"
+    expect:
+      - chanel__spring-1993-ready-to-wear
+      - chanel__fall-2000-ready-to-wear
+      - chanel__fall-2011-ready-to-wear
+    kind: historical
+    validated: true
+    notes: >
+      KEEP LABEL, ACCEPT LOW SCORE. Era query — belongs on the metadata/year path;
+      semantic embedding cannot resolve era. Pipeline surfaces modern AW shows (AW2018,
+      AW2022, AW2020) because they share similar bouclé/tweed visual vocabulary.
+      This is an embedding-model limit, not a label error.
+
+  - query: "tweed in motion runway walk"
+    expect:
+      - chanel__spring-1993-ready-to-wear
+      - chanel__fall-2000-ready-to-wear
+      - chanel__aw2016
+    kind: historical
+    validated: true
+    notes: >
+      KEEP LABEL, ACCEPT LOW SCORE. Era query — belongs on the metadata/year path;
+      semantic embedding cannot resolve era. Pipeline surfaces modern Chanel AW shows
+      and Loewe. Expected archival shows are honest recall gaps.
+
+  # ── METADATA queries (Phase F — year/brand/season structural filter) ────────
+
+  - query: "Chanel 1993"
+    expect:
+      - chanel__spring-1993-ready-to-wear
+    kind: metadata
+    validated: true
+    notes: >
+      Year + brand exact filter. Only one Chanel 1993 show in corpus. Pipeline
+      returns 5 moments, all from Spring 1993 RTW, conf=97 (metadata match).
+
+  - query: "Dior 2024"
+    expect:
+      - dior__fall-2024-ready-to-wear
+      - dior__spring-2024-ready-to-wear
+    kind: metadata
+    validated: true
+    notes: >
+      Year + brand filter. Two Dior 2024 shows in corpus (Spring and Fall RTW).
+      Pipeline returns both interleaved, conf=97.
+
+  - query: "Fall 2025 tailoring"
+    expect:
+      - dior__fall-2025-ready-to-wear
+      - jacquemus__fall-2025-ready-to-wear
+    kind: metadata
+    validated: true
+    notes: >
+      Year + season + residual concept hybrid. Filter: year=2025, season_code=FW.
+      KNN on residual "tailoring". Pipeline confirms Jacquemus in top-5 (conf 76).
+      Dior Fall 2025 is a canonical tailoring show and should rank; added as expected.
