@@ -7,6 +7,8 @@ frontend/.env.local
 node_modules/
 frontend/node_modules/
 backend/venv/
+backend/venv39_backup/
+backend/venv312_py312/
 backend/__pycache__/
 **/__pycache__/
 *.pyc
