@@ -417,13 +417,13 @@ class TestCalibrate:
 
 
 class TestConfidenceFloor:
-    def test_default_is_50(self, monkeypatch):
+    def test_default_is_60(self, monkeypatch):
         monkeypatch.delenv("SEARCH_CONFIDENCE_FLOOR", raising=False)
         # Re-import to pick up env change
         import importlib
         import services.confidence as cm
         importlib.reload(cm)
-        assert cm.confidence_floor() == 50
+        assert cm.confidence_floor() == 60
 
     def test_reads_from_env(self, monkeypatch):
         monkeypatch.setenv("SEARCH_CONFIDENCE_FLOOR", "65")
@@ -451,4 +451,4 @@ class TestConfidenceFloor:
         import importlib
         import services.confidence as cm
         importlib.reload(cm)
-        assert cm.confidence_floor() == 50
+        assert cm.confidence_floor() == 60

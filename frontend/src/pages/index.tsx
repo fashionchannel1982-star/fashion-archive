@@ -87,18 +87,18 @@ interface ShowItem {
 // ─────────────────────────────────────────
 
 function confidenceDisplay(c: number): string {
-  return Math.min(10, Math.round((c / 14) * 10)).toString();
+  return Math.round(c / 10).toString();
 }
 
 function confidenceLabel(c: number): string {
-  if (c >= 12) return "Strong";
-  if (c >= 9) return "Good";
+  if (c >= 90) return "Exact";
+  if (c >= 75) return "Strong";
   return "Relevant";
 }
 
 function confidenceColor(c: number): string {
-  if (c >= 12) return "#4ADE80";
-  if (c >= 9) return "#FACC15";
+  if (c >= 90) return "#4ADE80";
+  if (c >= 75) return "#FACC15";
   return "#94A3B8";
 }
 
@@ -938,7 +938,7 @@ export default function Home() {
       });
       const data: SearchResponse = await res.json();
       setResults(data.results);
-      setWeakMatch(data.results.length > 0 && data.results.every((r) => r.confidence < 12));
+      setWeakMatch(data.results.length > 0 && data.results.every((r) => r.confidence < 75));
       setProcessingTime(data.processing_time_ms);
       setHasSearched(true);
       log("search", { query: q, results: data.total, ms: data.processing_time_ms });

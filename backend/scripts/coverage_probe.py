@@ -35,7 +35,7 @@ HERO_QUERIES = [
 ]
 
 BRAND_QUERIES = [
-    "Gucci, bold colour and print",
+    "maximalist print colour runway",   # Phase D.5: swapped from "Gucci, bold colour and print" — LOCKED
     "Chanel tweed and tailoring",
     "Dior, romantic and sheer",
 ]

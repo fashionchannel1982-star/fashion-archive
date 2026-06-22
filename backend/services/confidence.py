@@ -81,10 +81,11 @@ def calibrate(raw_cos: float) -> int:
 def confidence_floor() -> int:
     """
     Return SEARCH_CONFIDENCE_FLOOR (calibrated units, 0–100).
-    Defaults to 50.  Clamped to [0, 100].
+    Defaults to 60 (aligns with the display-bucket suppression threshold from CLAUDE.md).
+    Clamped to [0, 100].
     """
     try:
-        v = int(os.environ.get("SEARCH_CONFIDENCE_FLOOR", 50))
+        v = int(os.environ.get("SEARCH_CONFIDENCE_FLOOR", 60))
     except (TypeError, ValueError):
-        v = 50
+        v = 60
     return max(0, min(100, v))

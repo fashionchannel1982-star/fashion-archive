@@ -448,6 +448,10 @@ async def semantic_search(
                         "_show_id": str(r.show_id),
                     })
                 return results
+            # IVFFlat may prune all candidates before the WHERE filter runs.
+            # When a brand filter was requested, never contaminate with unfiltered TL.
+            if brand_filter:
+                return []
         except Exception as e:
             logger.warning(f"pgvector search failed, falling back to TL: {e}")
 
