@@ -452,3 +452,112 @@ class TestConfidenceFloor:
         import services.confidence as cm
         importlib.reload(cm)
         assert cm.confidence_floor() == 60
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# services/structured_match.py — parse_metadata_filters
+# Phase F: year / brand / season structural token extraction
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestParseMetadataFilters:
+    @pytest.fixture(autouse=True)
+    def _fn(self):
+        from services.structured_match import parse_metadata_filters
+        from services.twelvelabs import KNOWN_BRANDS
+        self.parse = lambda q: parse_metadata_filters(q, known_brands=list(KNOWN_BRANDS))
+
+    # ── Year detection ────────────────────────────────────────────────────────
+
+    def test_year_detected(self):
+        m = self.parse("Chanel 1993")
+        assert m["year"] == 1993
+
+    def test_year_2024(self):
+        m = self.parse("Dior 2024")
+        assert m["year"] == 2024
+
+    def test_year_out_of_range_ignored(self):
+        m = self.parse("something 1920")
+        assert m["year"] is None
+
+    def test_year_future_out_of_range_ignored(self):
+        m = self.parse("something 2099")
+        assert m["year"] is None
+
+    # ── Brand detection ───────────────────────────────────────────────────────
+
+    def test_brand_chanel(self):
+        m = self.parse("Chanel 1993")
+        assert m["brand"] == "Chanel"
+
+    def test_brand_dior(self):
+        m = self.parse("Dior structured tailoring")
+        assert m["brand"] == "Dior"
+
+    def test_brand_vivienne_westwood(self):
+        m = self.parse("Vivienne Westwood 1993")
+        assert m["brand"] == "Vivienne Westwood"
+
+    def test_no_brand_concept_query(self):
+        m = self.parse("sheer black evening looks")
+        assert m["brand"] is None
+
+    # ── Season detection ──────────────────────────────────────────────────────
+
+    def test_season_fall(self):
+        m = self.parse("Fall 2025 tailoring")
+        assert m["season_code"] == "FW"
+
+    def test_season_autumn(self):
+        m = self.parse("Chanel Autumn 1993")
+        assert m["season_code"] == "FW"
+
+    def test_season_spring(self):
+        m = self.parse("Spring 2025 Chanel")
+        assert m["season_code"] == "SS"
+
+    def test_season_couture(self):
+        m = self.parse("Maison Margiela couture 2025")
+        assert m["season_code"] == "Couture"
+
+    def test_no_season_concept_query(self):
+        m = self.parse("structured shoulders, sharp tailoring")
+        assert m["season_code"] is None
+
+    # ── Residual extraction ───────────────────────────────────────────────────
+
+    def test_residual_pure_metadata(self):
+        # "Chanel 1993" — no residual concept
+        m = self.parse("Chanel 1993")
+        assert m["residual"] == ""
+
+    def test_residual_mixed(self):
+        m = self.parse("Chanel 1993 tweed")
+        assert "tweed" in m["residual"]
+        assert "1993" not in m["residual"]
+        assert "Chanel" not in m["residual"]
+
+    def test_residual_brand_only(self):
+        m = self.parse("Dior structured tailoring")
+        assert m["residual"] == "structured tailoring"
+
+    def test_residual_concept_query_unchanged(self):
+        q = "sheer black evening looks"
+        m = self.parse(q)
+        assert m["residual"] == q  # nothing stripped
+
+    # ── Pinned queries pass-through (must NOT be treated as structural) ───────
+
+    def test_concept_queries_have_no_structural(self):
+        concept_queries = [
+            "sheer black evening looks",
+            "structured shoulders, sharp tailoring",
+            "monochrome white, head to toe",
+            "maximalist print colour runway",
+            "red dress",
+            "a model pausing at the end of the runway",
+        ]
+        for q in concept_queries:
+            m = self.parse(q)
+            assert m["year"] is None, f"year found in concept query: {q!r}"
+            assert m["season_code"] is None, f"season found in concept query: {q!r}"

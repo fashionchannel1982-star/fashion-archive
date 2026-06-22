@@ -38,6 +38,7 @@ BRAND_QUERIES = [
     "maximalist print colour runway",   # Phase D.5: swapped from "Gucci, bold colour and print" — LOCKED
     "Chanel tweed and tailoring",
     "Dior structured tailoring",       # Phase D.6b: swapped from "Dior, romantic and sheer" — LOCKED (raw_max=0.093, Strong)
+    "Chanel 1993",                     # Phase F: metadata hybrid — restored from DROP after year filter fix — LOCKED
 ]
 
 ATTRIBUTE_QUERIES = [
@@ -46,7 +47,6 @@ ATTRIBUTE_QUERIES = [
 
 VERIFY_THEN_KEEP = [
     "a model pausing at the end of the runway",
-    "Chanel 1993",
 ]
 
 ALL_QUERIES = (

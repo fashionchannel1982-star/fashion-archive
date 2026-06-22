@@ -182,6 +182,144 @@ class SearchRequest(BaseModel):
         return v
 
 
+# ─────────────────────────────────────────
+# HYBRID METADATA SEARCH
+# ─────────────────────────────────────────
+
+# Confidence score assigned to pure metadata matches (no cosine component).
+# 97 → "Exact" bucket (≥90); honest because the filter is exact, not approximate.
+_METADATA_CONFIDENCE = 97
+
+
+async def _metadata_hybrid_search(
+    meta: dict,
+    limit: int,
+) -> list:
+    """
+    Hybrid retrieval for queries containing structural metadata tokens
+    (year, brand, season_code) plus an optional residual concept.
+
+    Pure metadata query  → SQL filter → ORDER BY timestamp_start, confidence=97
+    Mixed (filter+concept) → SQL filter → ORDER BY embedding cosine of residual
+
+    Returns the same item shape as twelvelabs.semantic_search so the caller
+    can reuse the existing result-building loop unchanged.
+    """
+    from services.database import AsyncSessionLocal, Moment, Show
+    from sqlalchemy import select, text as sql_text
+    from services import twelvelabs as tl_svc
+    from services.confidence import calibrate as cal
+
+    year = meta["year"]
+    brand = meta["brand"]
+    season_code = meta["season_code"]
+    residual = meta["residual"].strip()
+
+    # Build WHERE clauses
+    clauses: list = ["m.embedding IS NOT NULL"]
+    if brand:
+        safe_brand = brand.replace("'", "''")
+        clauses.append(f"s.brand ILIKE '{safe_brand}'")
+    if year:
+        clauses.append(f"s.year = {int(year)}")
+    if season_code == "FW":
+        clauses.append(
+            "(s.season_type ILIKE '%AW%' OR s.season ILIKE '%fall%' "
+            "OR s.season ILIKE '%autumn%' OR s.season ILIKE '%winter%' "
+            "OR s.season ILIKE '%AW%' OR s.season ILIKE '%FW%')"
+        )
+    elif season_code == "SS":
+        clauses.append(
+            "(s.season_type ILIKE '%SS%' OR s.season ILIKE '%spring%' "
+            "OR s.season ILIKE '%summer%' OR s.season ILIKE '%SS%')"
+        )
+    elif season_code == "Couture":
+        clauses.append("s.season ILIKE '%couture%'")
+
+    where = " AND ".join(clauses)
+
+    query_vec = None
+    vec_str = ""
+    if residual:
+        # Mixed query: embed residual concept, KNN within filtered subset
+        query_vec = await tl_svc.embed_text(residual)
+        if query_vec:
+            vec_str = "[" + ",".join(f"{v:.8f}" for v in query_vec) + "]"
+        else:
+            residual = ""  # embed failed — fall back to timestamp order
+
+    if residual and query_vec:
+        order_by = f"m.embedding <=> '{vec_str}'::vector"
+        sql = f"""
+            SELECT m.id, m.show_id, m.timestamp_start, m.timestamp_end,
+                   m.description, m.thumbnail_url,
+                   m.embedding <=> '{vec_str}'::vector AS distance
+            FROM moments m
+            JOIN shows s ON s.id = m.show_id
+            WHERE {where}
+            ORDER BY {order_by}
+            LIMIT {limit * 3}
+        """
+        use_cosine = True
+    else:
+        sql = f"""
+            SELECT m.id, m.show_id, m.timestamp_start, m.timestamp_end,
+                   m.description, m.thumbnail_url,
+                   NULL AS distance
+            FROM moments m
+            JOIN shows s ON s.id = m.show_id
+            WHERE {where}
+            ORDER BY m.timestamp_start
+            LIMIT {limit}
+        """
+        use_cosine = False
+
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(sql_text(sql))).fetchall()
+
+    if not rows:
+        return []
+
+    # Load shows
+    show_ids = list({r.show_id for r in rows})
+    async with AsyncSessionLocal() as session:
+        shows_map = {
+            s.id: s
+            for s in (
+                await session.execute(select(Show).where(Show.id.in_(show_ids)))
+            ).scalars().all()
+        }
+
+    results: list = []
+    for r in rows:
+        show = shows_map.get(r.show_id)
+        if use_cosine:
+            similarity = 1.0 - float(r.distance)
+            score = round(similarity, 4)
+            confidence = cal(similarity)
+            match_type = "hybrid"
+        else:
+            score = 1.0
+            confidence = _METADATA_CONFIDENCE
+            match_type = "metadata"
+        results.append({
+            "video_id": show.video_id if show else None,
+            "score": score,
+            "start": r.timestamp_start,
+            "end": r.timestamp_end,
+            "thumbnail_url": r.thumbnail_url,
+            "metadata": {},
+            "_moment_id": str(r.id),
+            "_show_id": str(r.show_id),
+            "_confidence_override": confidence,
+            "_match_type": match_type,
+        })
+        if len(results) >= limit:
+            break
+
+    return results
+
+
 @app.post("/api/search")
 async def search(req: SearchRequest, bg: BackgroundTasks):
     """Semantic search across ingested moments via Twelve Labs."""
@@ -193,17 +331,26 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
     from sqlalchemy import select, text
     from services.database import Moment, Show
 
-    from services.structured_match import parse_query_attributes, attribute_boost
+    from services.structured_match import parse_query_attributes, attribute_boost, parse_metadata_filters
+    from services.twelvelabs import KNOWN_BRANDS
+
     attrs = parse_query_attributes(req.query)
     has_attrs = any(attrs.values())
+
+    # Detect structural metadata tokens (year / brand / season)
+    meta = parse_metadata_filters(req.query, known_brands=list(KNOWN_BRANDS))
+    has_structural = bool(meta["year"] or meta["season_code"] or meta["brand"])
 
     # Widen the candidate pool when structured attributes are present so re-ranking
     # has material to promote; otherwise use the requested limit directly.
     _MAX_CANDIDATE = 150
     candidate_limit = min(req.limit * 3, _MAX_CANDIDATE) if has_attrs else req.limit
 
-    # Search via Twelve Labs
-    tl_results = await twelvelabs.semantic_search(req.query, limit=candidate_limit)
+    # Route: hybrid metadata path when structural tokens detected, else normal semantic path
+    if has_structural:
+        tl_results = await _metadata_hybrid_search(meta, limit=candidate_limit)
+    else:
+        tl_results = await twelvelabs.semantic_search(req.query, limit=candidate_limit)
 
     if not tl_results:
         from services.database import log_event
@@ -220,7 +367,8 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
     async with AsyncSessionLocal() as session:
         for item in tl_results:
             score = item.get("score", 0.0)
-            confidence = calibrate(score)
+            # Metadata matches carry a pre-computed confidence (exact filter, no cosine)
+            confidence = item.get("_confidence_override") or calibrate(score)
 
             # pgvector path returns _moment_id directly; TL path uses video_id + timestamp
             moment_id = item.get("_moment_id")
@@ -251,8 +399,10 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
                 if not _is_valid_description(description):
                     continue
 
-                # Apply calibrated confidence floor
-                if confidence < confidence_floor():
+                # Apply calibrated confidence floor — skip for metadata matches
+                # (their confidence=97 is exact-filter-based, not a cosine score)
+                is_metadata_match = item.get("_match_type") == "metadata"
+                if not is_metadata_match and confidence < confidence_floor():
                     continue
 
                 enriched_out = {
@@ -275,10 +425,11 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
                     "timestamp_end": moment.timestamp_end,
                     "description": description,
                     "thumbnail_url": moment.thumbnail_url or item.get("thumbnail_url"),
-                    "confidence": confidence,       # from original TL score, never boosted
+                    "confidence": confidence,
                     "score_raw": round(score, 4),
-                    "_boost": round(boost, 3),      # QA field; remove later if noisy
-                    "_rank_score": score + boost,   # used for sorting only, not displayed
+                    "match_type": item.get("_match_type", "semantic"),
+                    "_boost": round(boost, 3),      # QA field
+                    "_rank_score": score + boost,
                     "creative_director": show.creative_director,
                     "show_date": show.show_date.isoformat() if show.show_date else None,
                     "source": show.source,

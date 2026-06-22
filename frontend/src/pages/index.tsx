@@ -12,14 +12,18 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 // CONSTANTS
 // ─────────────────────────────────────────
 
-const HERO_QUERY = "Dior tailoring";
+const HERO_QUERY = "Dior structured tailoring";
 
 const CURATED_QUERIES = [
-  "sheer black eveningwear",
-  "Dior tailoring",
-  "couture gown",
-  "black turtleneck",
-  "print dress floral",
+  "sheer black evening looks",
+  "structured shoulders, sharp tailoring",
+  "monochrome white, head to toe",
+  "maximalist print colour runway",
+  "Chanel tweed and tailoring",
+  "Dior structured tailoring",
+  "Chanel 1993",
+  "red dress",
+  "a model pausing at the end of the runway",
 ];
 
 // ─────────────────────────────────────────
@@ -1219,21 +1223,21 @@ export default function Home() {
           </div>
         )}
 
-        {/* Synthesis line */}
-        {hasSearched && (synthesis || synthesizing) && results.length > 0 && (
+        {/* Synthesis line — shown ONLY when synthesis is grounded (non-null) */}
+        {hasSearched && results.length > 0 && (synthesizing || synthesis?.grounded) && (
           <div style={{
             maxWidth: 1280, margin: "0 auto 24px", padding: "0 32px",
             animation: "fadeIn 0.4s ease",
           }}>
             <div style={{
               padding: "16px 20px",
-              borderLeft: "2px solid rgba(237,232,220,0.2)",
-              background: "rgba(237,232,220,0.03)",
+              borderLeft: "2px solid #C8A97A",
+              background: "rgba(200,169,122,0.04)",
               borderRadius: "0 6px 6px 0",
             }}>
               <div style={{
                 fontFamily: "var(--font-body)", fontSize: 9, letterSpacing: "0.14em",
-                color: "#8A8A85", textTransform: "uppercase", marginBottom: 8,
+                color: "#C8A97A", textTransform: "uppercase", marginBottom: 8,
               }}>
                 Intelligence
               </div>
@@ -1241,19 +1245,12 @@ export default function Home() {
                 <div style={{ fontFamily: "var(--font-body)", fontSize: 12, color: "#555", fontStyle: "italic" }}>
                   Reading the results…
                 </div>
-              ) : synthesis?.grounded ? (
-                <div style={{
-                  fontFamily: "var(--font-display)", fontSize: 17, fontWeight: 300,
-                  color: "#EDE8DC", lineHeight: 1.6, letterSpacing: "0.03em",
-                }}>
-                  {synthesis.synthesis}
-                </div>
               ) : (
                 <div style={{
-                  fontFamily: "var(--font-body)", fontSize: 12,
-                  color: "#8A8A85", fontStyle: "italic",
+                  fontFamily: "var(--font-display)", fontSize: 17, fontWeight: 300,
+                  color: "#EDE8DC", lineHeight: 1.6, letterSpacing: "0.03em", fontStyle: "italic",
                 }}>
-                  {synthesis?.synthesis || "Not enough consistent evidence across these results to call a trend."}
+                  {synthesis?.synthesis}
                 </div>
               )}
             </div>
