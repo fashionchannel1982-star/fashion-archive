@@ -397,13 +397,25 @@ async def semantic_search(
     # Extract brand from query so pgvector embeds visual terms only
     brand_filter, visual_query = extract_brand_from_query(query)
 
-    # Try pgvector path first
+    # Diversity cap: max moments returned per show to prevent one show dominating results.
+    # Only applied on concept queries (no brand filter); brand queries want depth in one brand.
+    _raw_cap = os.environ.get("MAX_MOMENTS_PER_SHOW", "3")
+    try:
+        _diversity_cap = max(1, int(_raw_cap))
+    except (TypeError, ValueError):
+        _diversity_cap = 3
+
+    # Try pgvector exact KNN path first (index dropped → always a full sequential scan,
+    # which is sub-20ms for 3,280 vectors and guarantees the brand WHERE filter works).
     query_vec = await embed_text(visual_query)
     if query_vec:
         try:
             # Format floats to avoid scientific notation (pgvector can't parse 1e-05)
             vec_str = "[" + ",".join(f"{v:.8f}" for v in query_vec) + "]"
             brand_clause = f"AND s.brand ILIKE '{brand_filter.replace(chr(39), chr(39)*2)}'" if brand_filter else ""
+            # Fetch a wider candidate pool so diversity cap has material to work with.
+            # For brand queries the cap is not applied, so fetch only what was requested.
+            fetch_limit = limit if brand_filter else min(limit * 5, 500)
             # Interpolate directly — safe: vec_str is machine-generated floats, brand_clause uses ILIKE with single-quote escape
             async with AsyncSessionLocal() as session:
                 rows = await session.execute(
@@ -416,42 +428,44 @@ async def semantic_search(
                         WHERE m.embedding IS NOT NULL
                         {brand_clause}
                         ORDER BY m.embedding <=> '{vec_str}'::vector
-                        LIMIT {limit}
+                        LIMIT {fetch_limit}
                     """)
                 )
                 pgvec_results = rows.fetchall()
 
-            if pgvec_results:
-                show_ids = list({r.show_id for r in pgvec_results})
-                async with AsyncSessionLocal() as session:
-                    shows_rows = await session.execute(
-                        select(Show).where(Show.id.in_(show_ids))
-                    )
-                    shows_map = {s.id: s for s in shows_rows.scalars().all()}
+            show_ids = list({r.show_id for r in pgvec_results})
+            async with AsyncSessionLocal() as session:
+                shows_rows = await session.execute(
+                    select(Show).where(Show.id.in_(show_ids))
+                )
+                shows_map = {s.id: s for s in shows_rows.scalars().all()}
 
-                results = []
-                for r in pgvec_results:
-                    # distance is cosine distance (0=identical, 2=opposite for unit vectors)
-                    # similarity = 1 - distance (pgvector cosine op returns 1 - cosine_similarity)
-                    similarity = 1.0 - float(r.distance)
-                    if similarity < SIMILARITY_THRESHOLD:
+            results = []
+            per_show_count: dict = {}  # show_id → count (diversity cap)
+            for r in pgvec_results:
+                similarity = 1.0 - float(r.distance)
+                if similarity < SIMILARITY_THRESHOLD:
+                    continue
+                # Apply diversity cap only for concept queries (no brand filter)
+                if not brand_filter:
+                    show_count = per_show_count.get(r.show_id, 0)
+                    if show_count >= _diversity_cap:
                         continue
-                    show = shows_map.get(r.show_id)
-                    results.append({
-                        "video_id": show.video_id if show else None,
-                        "score": round(similarity, 4),
-                        "start": r.timestamp_start,
-                        "end": r.timestamp_end,
-                        "thumbnail_url": r.thumbnail_url,
-                        "metadata": {},
-                        "_moment_id": str(r.id),
-                        "_show_id": str(r.show_id),
-                    })
-                return results
-            # IVFFlat may prune all candidates before the WHERE filter runs.
-            # When a brand filter was requested, never contaminate with unfiltered TL.
-            if brand_filter:
-                return []
+                    per_show_count[r.show_id] = show_count + 1
+                show = shows_map.get(r.show_id)
+                results.append({
+                    "video_id": show.video_id if show else None,
+                    "score": round(similarity, 4),
+                    "start": r.timestamp_start,
+                    "end": r.timestamp_end,
+                    "thumbnail_url": r.thumbnail_url,
+                    "metadata": {},
+                    "_moment_id": str(r.id),
+                    "_show_id": str(r.show_id),
+                })
+                if len(results) >= limit:
+                    break
+            return results
         except Exception as e:
             logger.warning(f"pgvector search failed, falling back to TL: {e}")
 
