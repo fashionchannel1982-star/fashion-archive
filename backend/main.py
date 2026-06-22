@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
+
+from services.confidence import calibrate, confidence_floor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -218,7 +220,7 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
     async with AsyncSessionLocal() as session:
         for item in tl_results:
             score = item.get("score", 0.0)
-            confidence = round(score * 100)
+            confidence = calibrate(score)
 
             # pgvector path returns _moment_id directly; TL path uses video_id + timestamp
             moment_id = item.get("_moment_id")
@@ -247,6 +249,10 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
 
                 # Skip results whose description is a hedge, refusal, or placeholder
                 if not _is_valid_description(description):
+                    continue
+
+                # Apply calibrated confidence floor
+                if confidence < confidence_floor():
                     continue
 
                 enriched_out = {

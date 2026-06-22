@@ -2,23 +2,29 @@
 Fashion Archive — Demo Query Coverage Probe
 Read-only. Hits /api/search for the pinned demo query set and reports:
   - result count
-  - min / median / max confidence
+  - min / median / max confidence (calibrated)
   - whether synthesis fired (non-null synthesis line)
   - whether top-5 results have non-null provenance
     (brand / season / year / show_date / creative_director / source)
+  - raw cosine distribution for the top-20 (via --raw flag or --baseline)
 
 Usage:
     cd backend
     python scripts/coverage_probe.py
     python scripts/coverage_probe.py --server http://localhost:8001
     python scripts/coverage_probe.py --limit 20   # default 8
+    python scripts/coverage_probe.py --baseline   # write pre-calibration JSON snapshot
+    python scripts/coverage_probe.py --raw        # include raw score_raw in table
 """
 
 import argparse
 import json
+import os
 import statistics
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
 
 # ── Pinned demo query set ────────────────────────────────────────────────────
 
@@ -82,7 +88,7 @@ def check_provenance(result: dict):
     return missing
 
 
-def probe_query(query: str, kind: str, limit: int, server: str) -> dict:
+def probe_query(query: str, kind: str, limit: int, server: str, include_raw: bool = False) -> dict:
     try:
         body = search(query, limit, server)
     except Exception as e:
@@ -91,6 +97,7 @@ def probe_query(query: str, kind: str, limit: int, server: str) -> dict:
     results = body.get("results", [])
     synthesis = body.get("synthesis")
     confidences = [r.get("confidence", 0) for r in results]
+    raw_scores = [r.get("score_raw", 0) for r in results] if include_raw else []
 
     top5 = results[:5]
     prov_ok = []
@@ -102,7 +109,7 @@ def probe_query(query: str, kind: str, limit: int, server: str) -> dict:
         else:
             prov_ok.append(r.get("brand", "?"))
 
-    return {
+    row = {
         "query": query,
         "kind": kind,
         "count": len(results),
@@ -114,6 +121,11 @@ def probe_query(query: str, kind: str, limit: int, server: str) -> dict:
         "top5_prov_ok": len(prov_ok),
         "top5_prov_gaps": prov_gaps,
     }
+    if include_raw:
+        row["raw_scores"] = raw_scores
+        row["raw_min"] = round(min(raw_scores), 5) if raw_scores else None
+        row["raw_max"] = round(max(raw_scores), 5) if raw_scores else None
+    return row
 
 
 def print_report(rows: list):
@@ -171,6 +183,9 @@ def main():
     parser = argparse.ArgumentParser(description="FA demo query coverage probe")
     parser.add_argument("--server", default="http://localhost:8000")
     parser.add_argument("--limit", type=int, default=8)
+    parser.add_argument("--raw", action="store_true", help="Include raw score_raw in output")
+    parser.add_argument("--baseline", action="store_true",
+                        help="Write a timestamped JSON snapshot to eval/results/")
     args = parser.parse_args()
 
     # Health check
@@ -185,10 +200,25 @@ def main():
 
     rows = []
     for query, kind in ALL_QUERIES:
-        row = probe_query(query, kind, args.limit, args.server)
+        row = probe_query(query, kind, args.limit, args.server, include_raw=args.raw or args.baseline)
         rows.append(row)
 
     print_report(rows)
+
+    if args.baseline:
+        out_dir = Path(__file__).parent.parent / "eval" / "results"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        out_path = out_dir / f"coverage_baseline_{ts}.json"
+        snapshot = {
+            "snapshot_at": ts,
+            "server": args.server,
+            "limit": args.limit,
+            "rows": rows,
+        }
+        with open(out_path, "w") as f:
+            json.dump(snapshot, f, indent=2)
+        print(f"\nBaseline snapshot → {out_path}")
 
 
 if __name__ == "__main__":

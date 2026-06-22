@@ -1,0 +1,193 @@
+{
+  "snapshot_at": "20260622T122836Z",
+  "server": "http://localhost:8000",
+  "limit": 8,
+  "rows": [
+    {
+      "query": "sheer black evening looks",
+      "kind": "hero",
+      "count": 8,
+      "conf_min": 52,
+      "conf_median": 65.5,
+      "conf_max": 84,
+      "synthesis_fired": false,
+      "synthesis_preview": null,
+      "top5_prov_ok": 5,
+      "top5_prov_gaps": [],
+      "raw_scores": [
+        0.0837,
+        0.0786,
+        0.0768,
+        0.0733,
+        0.0667,
+        0.1059,
+        0.1048,
+        0.102
+      ],
+      "raw_min": 0.0667,
+      "raw_max": 0.1059
+    },
+    {
+      "query": "structured shoulders, sharp tailoring",
+      "kind": "hero",
+      "count": 1,
+      "conf_min": 53,
+      "conf_median": 53,
+      "conf_max": 53,
+      "synthesis_fired": false,
+      "synthesis_preview": null,
+      "top5_prov_ok": 1,
+      "top5_prov_gaps": [],
+      "raw_scores": [
+        0.0681
+      ],
+      "raw_min": 0.0681,
+      "raw_max": 0.0681
+    },
+    {
+      "query": "monochrome white, head to toe",
+      "kind": "hero",
+      "count": 8,
+      "conf_min": 68,
+      "conf_median": 74.5,
+      "conf_max": 77,
+      "synthesis_fired": false,
+      "synthesis_preview": null,
+      "top5_prov_ok": 5,
+      "top5_prov_gaps": [],
+      "raw_scores": [
+        0.0947,
+        0.0943,
+        0.0934,
+        0.0921,
+        0.0918,
+        0.0869,
+        0.0853,
+        0.0842
+      ],
+      "raw_min": 0.0842,
+      "raw_max": 0.0947
+    },
+    {
+      "query": "Gucci, bold colour and print",
+      "kind": "brand",
+      "count": 0,
+      "conf_min": null,
+      "conf_median": null,
+      "conf_max": null,
+      "synthesis_fired": false,
+      "synthesis_preview": null,
+      "top5_prov_ok": 0,
+      "top5_prov_gaps": [],
+      "raw_scores": [],
+      "raw_min": null,
+      "raw_max": null
+    },
+    {
+      "query": "Chanel tweed and tailoring",
+      "kind": "brand",
+      "count": 2,
+      "conf_min": 68,
+      "conf_median": 73.0,
+      "conf_max": 78,
+      "synthesis_fired": false,
+      "synthesis_preview": null,
+      "top5_prov_ok": 2,
+      "top5_prov_gaps": [],
+      "raw_scores": [
+        0.0969,
+        0.0843
+      ],
+      "raw_min": 0.0843,
+      "raw_max": 0.0969
+    },
+    {
+      "query": "Dior, romantic and sheer",
+      "kind": "brand",
+      "count": 4,
+      "conf_min": 92,
+      "conf_median": 100.0,
+      "conf_max": 100,
+      "synthesis_fired": true,
+      "synthesis_preview": "Dior's Spring 2025 champagne silk tulle gown gestures toward romantic sheerness,",
+      "top5_prov_ok": 4,
+      "top5_prov_gaps": [],
+      "raw_scores": [
+        0.875,
+        0.75,
+        0.375,
+        0.125
+      ],
+      "raw_min": 0.125,
+      "raw_max": 0.875
+    },
+    {
+      "query": "red dress",
+      "kind": "attr",
+      "count": 8,
+      "conf_min": 53,
+      "conf_median": 62.5,
+      "conf_max": 80,
+      "synthesis_fired": false,
+      "synthesis_preview": null,
+      "top5_prov_ok": 5,
+      "top5_prov_gaps": [],
+      "raw_scores": [
+        0.1003,
+        0.0805,
+        0.0782,
+        0.0777,
+        0.0729,
+        0.0704,
+        0.0681,
+        0.0828
+      ],
+      "raw_min": 0.0681,
+      "raw_max": 0.1003
+    },
+    {
+      "query": "a model pausing at the end of the runway",
+      "kind": "verify",
+      "count": 8,
+      "conf_min": 82,
+      "conf_median": 83.5,
+      "conf_max": 86,
+      "synthesis_fired": false,
+      "synthesis_preview": null,
+      "top5_prov_ok": 5,
+      "top5_prov_gaps": [],
+      "raw_scores": [
+        0.1107,
+        0.1069,
+        0.1061,
+        0.1059,
+        0.1048,
+        0.1044,
+        0.1029,
+        0.1026
+      ],
+      "raw_min": 0.1026,
+      "raw_max": 0.1107
+    },
+    {
+      "query": "Chanel 1993",
+      "kind": "verify",
+      "count": 4,
+      "conf_min": 92,
+      "conf_median": 100.0,
+      "conf_max": 100,
+      "synthesis_fired": false,
+      "synthesis_preview": null,
+      "top5_prov_ok": 4,
+      "top5_prov_gaps": [],
+      "raw_scores": [
+        0.875,
+        0.625,
+        0.375,
+        0.125
+      ],
+      "raw_min": 0.125,
+      "raw_max": 0.875
+    }
+  ]
+}

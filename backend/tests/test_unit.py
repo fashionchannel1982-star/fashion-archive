@@ -345,3 +345,110 @@ class TestConfidenceContract:
     # This means results with confidence 7–59 ARE currently returned.
     # The integration test (test_confidence_floor) verifies the actual floor is
     # SIMILARITY_THRESHOLD*100 = 7, NOT 60.  See FINDINGS in the README.
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# services/confidence.py — calibrate() and confidence_floor()
+# Phase D: logistic calibration; strictly monotonic; env-adjustable floor.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCalibrate:
+    @pytest.fixture(autouse=True)
+    def _fn(self):
+        from services.confidence import calibrate
+        self.calibrate = calibrate
+
+    def test_returns_int(self):
+        assert isinstance(self.calibrate(0.10), int)
+
+    def test_clamped_at_zero_for_negative_input(self):
+        assert self.calibrate(-1.0) == 0
+
+    def test_clamped_at_100_for_high_input(self):
+        assert self.calibrate(10.0) == 100
+
+    def test_inflection_at_x0(self):
+        # At cos == x0 (0.065) the output should be 50
+        result = self.calibrate(0.065)
+        assert 48 <= result <= 52
+
+    def test_noise_floor_suppressed(self):
+        # Noise (cos ~0.04) should map well below 50
+        assert self.calibrate(0.04) < 45
+
+    def test_concept_match_strong(self):
+        # Genuine concept match (cos ~0.10) should land in Strong (75-89)
+        result = self.calibrate(0.10)
+        assert 75 <= result <= 89, f"Expected Strong band, got {result}"
+
+    def test_brand_exact(self):
+        # Brand-anchored match (cos ~0.13) should reach Exact (90+)
+        result = self.calibrate(0.13)
+        assert result >= 90, f"Expected Exact band, got {result}"
+
+    def test_monotonic(self):
+        # calibrate must be non-decreasing over a fine-grained sweep
+        import numpy as _np
+        cos_vals = [i / 1000.0 for i in range(0, 401)]  # 0.0 to 0.4 in steps of 0.001
+        cal_vals = [self.calibrate(c) for c in cos_vals]
+        for i in range(len(cal_vals) - 1):
+            assert cal_vals[i] <= cal_vals[i + 1], (
+                f"Non-monotonic at cos={cos_vals[i]:.3f} → {cos_vals[i+1]:.3f}: "
+                f"{cal_vals[i]} > {cal_vals[i+1]}"
+            )
+
+    @pytest.mark.parametrize("cos,band", [
+        (0.14, "Exact"),    # >= 90
+        (0.10, "Strong"),   # 75-89
+        (0.08, "Relevant"), # 60-74
+        (0.04, "suppress"), # < 60
+    ])
+    def test_display_buckets_map_correctly(self, cos, band):
+        conf = self.calibrate(cos)
+        if conf >= 90:
+            actual = "Exact"
+        elif conf >= 75:
+            actual = "Strong"
+        elif conf >= 60:
+            actual = "Relevant"
+        else:
+            actual = "suppress"
+        assert actual == band, f"cos={cos} → conf={conf} → {actual}, expected {band}"
+
+
+class TestConfidenceFloor:
+    def test_default_is_50(self, monkeypatch):
+        monkeypatch.delenv("SEARCH_CONFIDENCE_FLOOR", raising=False)
+        # Re-import to pick up env change
+        import importlib
+        import services.confidence as cm
+        importlib.reload(cm)
+        assert cm.confidence_floor() == 50
+
+    def test_reads_from_env(self, monkeypatch):
+        monkeypatch.setenv("SEARCH_CONFIDENCE_FLOOR", "65")
+        import importlib
+        import services.confidence as cm
+        importlib.reload(cm)
+        assert cm.confidence_floor() == 65
+
+    def test_clamped_above_100(self, monkeypatch):
+        monkeypatch.setenv("SEARCH_CONFIDENCE_FLOOR", "999")
+        import importlib
+        import services.confidence as cm
+        importlib.reload(cm)
+        assert cm.confidence_floor() == 100
+
+    def test_clamped_below_0(self, monkeypatch):
+        monkeypatch.setenv("SEARCH_CONFIDENCE_FLOOR", "-10")
+        import importlib
+        import services.confidence as cm
+        importlib.reload(cm)
+        assert cm.confidence_floor() == 0
+
+    def test_invalid_env_returns_default(self, monkeypatch):
+        monkeypatch.setenv("SEARCH_CONFIDENCE_FLOOR", "notanint")
+        import importlib
+        import services.confidence as cm
+        importlib.reload(cm)
+        assert cm.confidence_floor() == 50

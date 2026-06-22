@@ -47,11 +47,12 @@ def _get_index_id() -> str:
         )
     return idx
 
-# Minimum cosine similarity to include a result.
-# Marengo3.0 text↔image cross-modal similarity clusters 0.06–0.14 for fashion queries.
-# 0.09 = "Good" band floor — suppress "Relevant" results entirely since wrong-colour
-# near-misses (blue skirt for black, orange skirt) erode trust more than no result.
-SIMILARITY_THRESHOLD = 0.07
+# Raw cosine pre-filter — keeps only candidates with a non-trivial similarity signal
+# before they reach the calibration layer in main.py.
+# Set deliberately low (0.03) so the calibration floor (SEARCH_CONFIDENCE_FLOOR,
+# default 50 on the 0-100 scale) governs what the user actually sees.
+# Changing the effective display cutoff: adjust SEARCH_CONFIDENCE_FLOOR, not this.
+SIMILARITY_THRESHOLD = 0.03
 
 # Known brands — used to extract brand filter from free-text queries
 KNOWN_BRANDS = [
