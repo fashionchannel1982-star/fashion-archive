@@ -37,7 +37,7 @@ HERO_QUERIES = [
 BRAND_QUERIES = [
     "maximalist print colour runway",   # Phase D.5: swapped from "Gucci, bold colour and print" — LOCKED
     "Chanel tweed and tailoring",
-    "Dior, romantic and sheer",
+    "Dior structured tailoring",       # Phase D.6b: swapped from "Dior, romantic and sheer" — LOCKED (raw_max=0.093, Strong)
 ]
 
 ATTRIBUTE_QUERIES = [
