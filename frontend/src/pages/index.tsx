@@ -14,6 +14,8 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const HERO_QUERY = "sheer black evening looks";
 
+// Locked demo chips — each verified to return ≥1 strong result (conf ≥75).
+// Do NOT add chips without probing first.
 const CURATED_QUERIES = [
   "sheer black evening looks",
   "structured shoulders, sharp tailoring",
@@ -21,9 +23,7 @@ const CURATED_QUERIES = [
   "maximalist print colour runway",
   "Chanel tweed and tailoring",
   "Dior structured tailoring",
-  "Chanel 1993",
   "red dress",
-  "a model pausing at the end of the runway",
 ];
 
 // ─────────────────────────────────────────
@@ -127,6 +127,32 @@ function formatShowDate(iso: string | null | undefined): string {
   } catch {
     return "";
   }
+}
+
+function diverseShows(shows: ShowItem[]): ShowItem[] {
+  const groupMap: Record<string, ShowItem[]> = {};
+  for (const s of shows) {
+    if (!groupMap[s.brand]) groupMap[s.brand] = [];
+    groupMap[s.brand].push(s);
+  }
+  // Within each brand, most recent year first
+  for (const key of Object.keys(groupMap)) {
+    groupMap[key].sort((a: ShowItem, b: ShowItem) => b.year - a.year);
+  }
+  // Round-robin interleave: brands with fewer shows go first in each cycle
+  const cols: ShowItem[][] = Object.values(groupMap).sort(
+    (a: ShowItem[], b: ShowItem[]) => a.length - b.length
+  );
+  const out: ShowItem[] = [];
+  let added = true;
+  while (added) {
+    added = false;
+    for (const col of cols) {
+      const s = col.shift();
+      if (s) { out.push(s); added = true; }
+    }
+  }
+  return out;
 }
 
 function formatSource(source: string | null | undefined): string {
@@ -531,7 +557,7 @@ function ResultCard({
               transition: "all 0.15s", display: "flex", alignItems: "center", gap: 5,
             }}
           >
-            {isPinned ? "⊞ Pinned" : "⊞ Board"}
+            {isPinned ? "⊞ Collected" : "⊞ Collect"}
           </button>
 
           <button
@@ -738,7 +764,7 @@ function MoodBoardPanel({ items, onRemove, onClose, onExportBoard }: {
         display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         <span style={{ fontFamily: "var(--font-display)", fontSize: 15, color: "#F5F5F0", letterSpacing: "0.08em" }}>
-          Mood Board ({items.length})
+          Collected Looks ({items.length})
         </span>
         <div style={{ display: "flex", gap: 8 }}>
           {items.length > 0 && (
@@ -754,7 +780,7 @@ function MoodBoardPanel({ items, onRemove, onClose, onExportBoard }: {
       <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
         {items.length === 0 ? (
           <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "#8A8A85", textAlign: "center", marginTop: 40 }}>
-            Pin looks with ⊞ Board to build your mood board.
+            Collect looks with ⊞ Collect to build your board.
           </p>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -1112,21 +1138,7 @@ export default function Home() {
         </span>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {/* Timeline link — always visible */}
-          <a href="/timeline" style={{
-            fontFamily: "var(--font-body)", fontSize: 11,
-            color: "#8A8A85", letterSpacing: "0.1em",
-            textDecoration: "none", padding: "4px 10px",
-            border: "1px solid rgba(255,255,255,0.07)", borderRadius: 4,
-            transition: "color 0.15s, border-color 0.15s",
-          }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#C8A97A"; (e.currentTarget as HTMLElement).style.borderColor = "#C8A97A"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#8A8A85"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.07)"; }}
-          >
-            Timeline
-          </a>
-
-          {/* Mood board toggle */}
+          {/* Looks board (mood board) toggle */}
           <button
             onClick={() => { setShowMoodBoard((v) => !v); setShowBookmarks(false); }}
             style={{
@@ -1138,7 +1150,7 @@ export default function Home() {
               letterSpacing: "0.1em", transition: "all 0.15s",
             }}
           >
-            ⊞ Board {moodBoard.size > 0 ? `(${moodBoard.size})` : ""}
+            ⊞ Looks {moodBoard.size > 0 ? `(${moodBoard.size})` : ""}
           </button>
 
           {/* Bookmark toggle */}
@@ -1438,7 +1450,7 @@ export default function Home() {
               </div>
             </a>
 
-            {/* Shows grid */}
+            {/* Shows grid — diversity-sorted: one from each house, round-robin, most recent first per house */}
             {shows.length > 0 && (
               <>
                 <div style={{
@@ -1448,7 +1460,7 @@ export default function Home() {
                   Browse shows — click for brief
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
-                  {shows.filter((s) => s.status === "ready").map((show) => (
+                  {diverseShows(shows.filter((s) => s.status === "ready")).map((show) => (
                     <button
                       key={show.id}
                       onClick={() => { setActiveBrief(show); log("brief_open", { show_id: show.id, brand: show.brand }); }}
