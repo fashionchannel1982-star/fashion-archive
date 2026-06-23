@@ -48,6 +48,7 @@ const log = (event: string, data: Record<string, unknown>) => {
 interface SearchResult {
   moment_id: string;
   show_id: string;
+  show_key?: string | null;
   brand: string;
   season: string;
   season_type?: string | null;
@@ -58,6 +59,7 @@ interface SearchResult {
   thumbnail_url?: string;
   confidence: number;
   score_raw: number;
+  match_type?: string | null;
   creative_director?: string | null;
   show_date?: string | null;
   source?: string | null;
@@ -349,15 +351,9 @@ function ResultCard({
   const isBookmarked = bookmarks.has(result.moment_id);
   const isPinned = pinned.has(result.moment_id);
 
-  // Build provenance line parts
-  const provParts: Array<{ text: string; color?: string }> = [];
-  if (result.brand) provParts.push({ text: result.brand });
-  if (result.season) provParts.push({ text: result.season });
+  // Provenance parts with explicit hierarchy — brand is in the header pill, not here
   const dateStr = formatShowDate(result.show_date);
-  if (dateStr) provParts.push({ text: dateStr });
-  if (result.creative_director) provParts.push({ text: result.creative_director, color: "#C8A97A" });
   const sourceStr = formatSource(result.source);
-  if (sourceStr) provParts.push({ text: sourceStr });
 
   return (
     <div
@@ -470,21 +466,40 @@ function ResultCard({
           {result.description}
         </p>
 
-        {/* Provenance line */}
-        {provParts.length > 0 && (
-          <div style={{
-            fontFamily: "var(--font-body)", fontSize: 10, color: "#8A8A85",
-            marginBottom: 12, letterSpacing: "0.04em",
-            display: "flex", flexWrap: "wrap", gap: 0, alignItems: "center",
-          }}>
-            {provParts.map((part, i) => (
-              <span key={i} style={{ color: part.color || "#8A8A85" }}>
-                {i > 0 && <span style={{ color: "#3A3A38", margin: "0 4px" }}>·</span>}
-                {part.text}
-              </span>
-            ))}
-          </div>
-        )}
+        {/* Provenance — editorial credit line with explicit hierarchy */}
+        <div style={{
+          fontFamily: "var(--font-body)", fontSize: 10,
+          marginBottom: 12, display: "flex", flexWrap: "wrap",
+          alignItems: "baseline", gap: 0, lineHeight: 1.6,
+        }}>
+          {/* Season — lead element, slightly brighter */}
+          {result.season && (
+            <span style={{ color: "#A8A8A3", letterSpacing: "0.04em" }}>
+              {result.season}
+            </span>
+          )}
+          {/* Date — same register as season, muted */}
+          {dateStr && (
+            <span style={{ color: "#5A5A56", letterSpacing: "0.03em" }}>
+              <span style={{ margin: "0 5px", color: "#2E2E2C" }}>·</span>
+              {dateStr}
+            </span>
+          )}
+          {/* Creative director — gold, the editorial credit */}
+          {result.creative_director && (
+            <span style={{ color: "#C8A97A", letterSpacing: "0.04em", fontWeight: 400 }}>
+              <span style={{ margin: "0 5px", color: "#2E2E2C" }}>·</span>
+              {result.creative_director}
+            </span>
+          )}
+          {/* Source — most subtle, rightmost */}
+          {sourceStr && (
+            <span style={{ color: "#3E3E3C", letterSpacing: "0.04em" }}>
+              <span style={{ margin: "0 5px", color: "#2A2A28" }}>·</span>
+              {sourceStr}
+            </span>
+          )}
+        </div>
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1257,8 +1272,16 @@ export default function Home() {
                 Intelligence
               </div>
               {synthesizing && !synthesis ? (
-                <div style={{ fontFamily: "var(--font-body)", fontSize: 12, color: "#444", fontStyle: "italic", letterSpacing: "0.04em" }}>
-                  Reading the archive…
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 2 }}>
+                  <div className="synth-shimmer" style={{
+                    height: 18, borderRadius: 2, width: "88%",
+                    background: "rgba(200,169,122,0.12)",
+                  }} />
+                  <div className="synth-shimmer" style={{
+                    height: 18, borderRadius: 2, width: "62%",
+                    background: "rgba(200,169,122,0.07)",
+                    animationDelay: "0.25s",
+                  }} />
                 </div>
               ) : (
                 <div style={{
