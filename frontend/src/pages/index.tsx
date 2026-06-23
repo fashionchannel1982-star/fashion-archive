@@ -90,9 +90,12 @@ interface ShowItem {
 // HELPERS
 // ─────────────────────────────────────────
 
-function confidenceDisplay(c: number): string {
-  return Math.round(c / 10).toString();
-}
+// CONFIDENCE_MODE controls how match strength is presented:
+//   "bucket"  — default: ● Exact / ● Strong / ● Relevant  (no raw number)
+//   "number"  — raw score: 9/10 · Exact  (previous behaviour)
+//   "hidden"  — dot only (no text)
+// Change this constant to switch the display; no other code changes needed.
+const CONFIDENCE_MODE: "bucket" | "number" | "hidden" = "bucket";
 
 function confidenceLabel(c: number): string {
   if (c >= 90) return "Exact";
@@ -430,22 +433,30 @@ function ResultCard({
           }}>
             {result.brand}
           </span>
-          <span style={{
-            fontFamily: "var(--font-body)", fontSize: 10, color: "#8A8A85", letterSpacing: "0.05em",
-          }}>
-            {result.season}
-          </span>
+          {/* Archive badge — archival seasons feel premium, not tagged */}
+          {result.year && result.year < 2020 && (
+            <span style={{
+              fontFamily: "var(--font-body)", fontSize: 9, letterSpacing: "0.12em",
+              color: "#8A8A85", border: "1px solid rgba(138,138,133,0.25)",
+              borderRadius: 2, padding: "1px 5px", textTransform: "uppercase",
+            }}>
+              {result.year} · Archive
+            </span>
+          )}
           <div style={{ flex: 1 }} />
+          {/* Confidence badge — mode controlled by CONFIDENCE_MODE constant */}
           <span style={{
             fontFamily: "var(--font-body)", fontSize: 10, fontWeight: 500,
             color: confidenceColor(result.confidence), letterSpacing: "0.05em",
             display: "flex", alignItems: "center", gap: 4,
           }}>
             <span style={{
-              width: 6, height: 6, borderRadius: "50%",
+              width: 5, height: 5, borderRadius: "50%",
               background: confidenceColor(result.confidence), display: "inline-block",
             }} />
-            {confidenceDisplay(result.confidence)}/10 · {confidenceLabel(result.confidence)}
+            {CONFIDENCE_MODE === "bucket" && confidenceLabel(result.confidence)}
+            {CONFIDENCE_MODE === "number" && `${Math.round(result.confidence / 10)}/10 · ${confidenceLabel(result.confidence)}`}
+            {/* hidden: dot only — no text */}
           </span>
         </div>
 
@@ -1234,25 +1245,25 @@ export default function Home() {
             animation: "fadeIn 0.4s ease",
           }}>
             <div style={{
-              padding: "16px 20px",
+              padding: "18px 24px",
               borderLeft: "2px solid #C8A97A",
               background: "rgba(200,169,122,0.04)",
-              borderRadius: "0 6px 6px 0",
+              borderRadius: "0 8px 8px 0",
             }}>
               <div style={{
-                fontFamily: "var(--font-body)", fontSize: 9, letterSpacing: "0.14em",
-                color: "#C8A97A", textTransform: "uppercase", marginBottom: 8,
+                fontFamily: "var(--font-body)", fontSize: 9, letterSpacing: "0.16em",
+                color: "#C8A97A", textTransform: "uppercase", marginBottom: 10,
               }}>
                 Intelligence
               </div>
               {synthesizing && !synthesis ? (
-                <div style={{ fontFamily: "var(--font-body)", fontSize: 12, color: "#555", fontStyle: "italic" }}>
-                  Reading the results…
+                <div style={{ fontFamily: "var(--font-body)", fontSize: 12, color: "#444", fontStyle: "italic", letterSpacing: "0.04em" }}>
+                  Reading the archive…
                 </div>
               ) : (
                 <div style={{
-                  fontFamily: "var(--font-display)", fontSize: 17, fontWeight: 300,
-                  color: "#EDE8DC", lineHeight: 1.6, letterSpacing: "0.03em", fontStyle: "italic",
+                  fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 300,
+                  color: "#EDE8DC", lineHeight: 1.65, letterSpacing: "0.02em", fontStyle: "italic",
                 }}>
                   {synthesis?.synthesis}
                 </div>
@@ -1285,10 +1296,39 @@ export default function Home() {
           </div>
         )}
 
-        {/* No results */}
+        {/* No results — editorial empty state, not a sad blank */}
         {hasSearched && !loading && results.length === 0 && (
-          <div style={{ textAlign: "center", padding: "60px 32px", fontFamily: "var(--font-display)", fontSize: 18, color: "#8A8A85", fontWeight: 300 }}>
-            No results for "{query}"
+          <div style={{ textAlign: "center", padding: "80px 32px 48px" }}>
+            <div style={{
+              fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 300,
+              color: "#8A8A85", marginBottom: 10, letterSpacing: "0.02em",
+            }}>
+              Nothing found in the archive
+            </div>
+            <div style={{
+              fontFamily: "var(--font-body)", fontSize: 12, color: "#444",
+              letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 36,
+            }}>
+              Try a different search, or explore the archive below
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+              {CURATED_QUERIES.map((chip) => (
+                <button
+                  key={chip}
+                  onClick={() => handleChipClick(chip)}
+                  style={{
+                    background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 20, padding: "6px 14px", cursor: "pointer",
+                    fontFamily: "var(--font-body)", fontSize: 12, color: "#8A8A85",
+                    letterSpacing: "0.04em", transition: "all 0.15s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = "#EDE8DC"; e.currentTarget.style.borderColor = "rgba(237,232,220,0.2)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = "#8A8A85"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
