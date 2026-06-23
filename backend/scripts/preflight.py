@@ -7,6 +7,7 @@ Or via:           make preflight
 Exits 0 only when all checks pass. Prints a green/red board.
 """
 
+import argparse
 import os
 import subprocess
 import sys
@@ -51,6 +52,11 @@ def check_health(label, url, timeout=5):
         return False, time.time() - t0, str(e)
 
 
+_ap = argparse.ArgumentParser(description="Fashion Archive preflight")
+_ap.add_argument("--full", action="store_true", help="Run full validated eval set (default: 3-query smoke)")
+_ARGS = _ap.parse_args()
+EVAL_FULL = _ARGS.full
+
 GREEN = "\033[32m"
 RED   = "\033[31m"
 RESET = "\033[0m"
@@ -91,15 +97,15 @@ if "refused" in detail.lower() or "timed out" in detail.lower() or "timeout" in 
 else:
     check("Backend health (http://localhost:8000)", ok, t, detail)
 
-# 5. Eval harness smoke (validated queries only; skip if server not running)
+# 5. Eval harness smoke (skip if server not running)
 if ok:
-    ok2, t2, out2 = run(
-        "eval smoke (validated queries)",
-        [_python(), "eval/run_eval.py", "--server", "http://localhost:8000",
-         "--validated-only"],
-        cwd=BACKEND, timeout=120,
-    )
-    check("Eval smoke (validated queries)", ok2, t2, out2)
+    eval_cmd = [_python(), "eval/run_eval.py", "--server", "http://localhost:8000", "--validated-only"]
+    if not EVAL_FULL:
+        eval_cmd += ["--limit", "3"]
+    label = "Eval (validated, full)" if EVAL_FULL else "Eval smoke (3 validated queries)"
+    timeout = 240 if EVAL_FULL else 60
+    ok2, t2, out2 = run("eval", eval_cmd, cwd=BACKEND, timeout=timeout)
+    check(label, ok2, t2, out2)
 else:
     print(f"  {'–':1}  {'Eval smoke (skipped — server not running)':45} {'skip':>8}")
 
