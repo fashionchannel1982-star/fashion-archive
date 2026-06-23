@@ -674,3 +674,130 @@ class TestAccessoriesBoost:
         b = self.boost(enriched, attrs)
         from services.structured_match import _BOOST_CAP
         assert b <= _BOOST_CAP
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# services/structured_match.py — 2-digit year + compound season-code parsing
+# Feature: FW25, SS00, AW '93, bare "Chanel 00", rejection of bare "50"
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestExpand2DigitYear:
+    @pytest.fixture(autouse=True)
+    def _fn(self):
+        from services.structured_match import _expand_2digit_year
+        self.expand = _expand_2digit_year
+
+    def test_00_maps_to_2000(self):
+        assert self.expand(0) == 2000
+
+    def test_25_maps_to_2025(self):
+        assert self.expand(25) == 2025
+
+    def test_26_maps_to_2026(self):
+        assert self.expand(26) == 2026
+
+    def test_93_maps_to_1993(self):
+        assert self.expand(93) == 1993
+
+    def test_85_maps_to_1985(self):
+        assert self.expand(85) == 1985
+
+    def test_99_maps_to_1999(self):
+        assert self.expand(99) == 1999
+
+    def test_27_returns_none(self):
+        assert self.expand(27) is None
+
+    def test_50_returns_none(self):
+        assert self.expand(50) is None
+
+    def test_84_returns_none(self):
+        assert self.expand(84) is None
+
+
+class TestCompoundSeasonYear:
+    """FW25, SS00, AW '93, Spring 25, FW25/26 compound token parsing."""
+
+    @pytest.fixture(autouse=True)
+    def _fn(self):
+        from services.structured_match import parse_metadata_filters
+        self.parse = parse_metadata_filters
+
+    def test_fw25_gives_year_2025_and_fw(self):
+        m = self.parse("Dior FW25")
+        assert m["year"] == 2025
+        assert m["season_code"] == "FW"
+
+    def test_ss00_gives_year_2000_and_ss(self):
+        m = self.parse("SS00 minimalism")
+        assert m["year"] == 2000
+        assert m["season_code"] == "SS"
+
+    def test_aw_apostrophe_93(self):
+        m = self.parse("Margiela AW '93")
+        assert m["year"] == 1993
+        assert m["season_code"] == "FW"
+
+    def test_fw25_slash_26_takes_first_year(self):
+        m = self.parse("FW25/26 tailoring")
+        assert m["year"] == 2025
+        assert m["season_code"] == "FW"
+
+    def test_4digit_year_with_season_prefix(self):
+        m = self.parse("Chanel AW2016 bouclé")
+        assert m["year"] == 2016
+        assert m["season_code"] == "FW"
+
+    def test_spring_2digit(self):
+        m = self.parse("Spring 93 florals")
+        assert m["year"] == 1993
+        assert m["season_code"] == "SS"
+
+    def test_compound_strips_token_from_residual(self):
+        m = self.parse("Dior FW25 tailoring")
+        assert "fw25" not in m["residual"].lower()
+        assert "25" not in m["residual"]
+
+    def test_compound_brand_and_season_together(self):
+        m = self.parse("Chanel SS93 tweed")
+        assert m["year"] == 1993
+        assert m["season_code"] == "SS"
+        # "Chanel" not provided as known_brand so brand stays None
+        assert m["brand"] is None
+
+
+class TestBare2DigitYear:
+    """Bare 2-digit year: committed only with brand/season context."""
+
+    @pytest.fixture(autouse=True)
+    def _fn(self):
+        from services.structured_match import parse_metadata_filters
+        self.parse = parse_metadata_filters
+
+    def test_chanel_00_gives_year_2000(self):
+        m = self.parse("Chanel 00", known_brands=["Chanel"])
+        assert m["year"] == 2000
+        assert m["brand"] == "Chanel"
+
+    def test_brand_93_gives_year_1993(self):
+        m = self.parse("Dior 93", known_brands=["Dior"])
+        assert m["year"] == 1993
+
+    def test_bare_25_no_context_is_ambiguous(self):
+        m = self.parse("tailoring 25")
+        assert m["year"] is None
+        assert "25" in m["ambiguous"]
+
+    def test_bare_50_no_context_not_a_year(self):
+        # 50 is in 27-84 range → silently left in residual, NOT in ambiguous
+        m = self.parse("tailoring 50")
+        assert m["year"] is None
+        assert "50" not in m["ambiguous"]
+        assert "50" in m["residual"]
+
+    def test_bare_25_with_season_context_commits(self):
+        # A prior season_code from the word-based scan provides context.
+        # "Fall 25 collection" — "Fall" sets season_code, then "25" can commit.
+        m = self.parse("Fall 25 collection")
+        assert m["year"] == 2025
+        assert m["season_code"] == "FW"

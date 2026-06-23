@@ -28,6 +28,30 @@ _SEASON_MAP: dict = {
 _STRUCTURAL_STOPS: frozenset = frozenset({"ready-to-wear", "rtw", "collection"})
 
 # Decade tokens: "90s" → (year_min, year_max).  Soft ±2 so "90s" includes Fall 2000.
+# Compound season+year tokens: FW25, SS00, AW '93, Spring 25, FW25/26
+# Group 1 = season word/abbrev, Group 2 = 2- or 4-digit year
+_SEASON_YY_RE = re.compile(
+    r"(?<!\w)"
+    r"(fw|aw|a-w|ss|s-s|fall|autumn|winter|spring|summer|couture)"
+    r"[\s'’‘]*"
+    r"(\d{4}|\d{2})"
+    r"(?:/\d{2,4})?"   # optional /YY or /YYYY range — discard, take first year
+    r"(?!\w)",
+    re.IGNORECASE,
+)
+
+# Season abbreviation/word → canonical code for _SEASON_YY_RE results
+_SEASON_CODE_MAP: dict = {
+    "fw": "FW", "aw": "FW", "a-w": "FW",
+    "fall": "FW", "autumn": "FW", "winter": "FW",
+    "ss": "SS", "s-s": "SS",
+    "spring": "SS", "summer": "SS",
+    "couture": "Couture",
+}
+
+# Bare 2-digit number not adjacent to other digits
+_BARE_2DIGIT_RE = re.compile(r"(?<!\d)\b(\d{2})\b(?!\d)")
+
 _DECADE_RE = re.compile(r"\b(\d{2,4})s\b", re.IGNORECASE)
 _DECADE_RANGES: dict = {
     "60": (1958, 1971),
@@ -49,23 +73,38 @@ _ERA_TOKENS: list = [
 ]
 
 
+def _expand_2digit_year(yy: int) -> Optional[int]:
+    """Map a 2-digit year to 4-digit using corpus range.
+    00–26 → 2000–2026;  85–99 → 1985–1999;  27–84 → None (out of corpus)."""
+    if 0 <= yy <= 26:
+        return 2000 + yy
+    if 85 <= yy <= 99:
+        return 1900 + yy
+    return None
+
+
 def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> dict:
     """
     Parse structural metadata tokens from a free-text query.
 
     Returns a dict:
-      year:        int or None    — exact 4-digit year in range 1985–2026
+      year:        int or None    — exact year (4-digit or resolved 2-digit)
       year_min:    int or None    — lower bound from a decade/era token
       year_max:    int or None    — upper bound from a decade/era token
       brand:       str or None    — matched brand name (from known_brands)
       season_code: str or None    — 'FW', 'SS', or 'Couture'
       residual:    str            — query with structural tokens removed
       ambiguous:   list[str]      — tokens that looked structural but were uncertain
+
+    2-digit year disambiguation (requires brand or season context):
+      00–26 → 2000–2026;  85–99 → 1985–1999;  27–84 → not a year.
+    Compound season codes (FW25, SS00, AW '93, FW25/26) are parsed in one pass.
     """
     text = query
     ambiguous: list = []
     year_min: Optional[int] = None
     year_max: Optional[int] = None
+    season_code: Optional[str] = None  # may be set by step 1a before brand detection
 
     # 0. Era phrases (before year / brand detection; longest phrase first)
     brand_lock: Optional[str] = None
@@ -76,32 +115,48 @@ def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> d
             brand_lock = era_brand
             year_min = era_min
             year_max = era_max
-            # Remove the era phrase from text
             text = re.sub(re.escape(phrase), " ", text, flags=re.IGNORECASE)
             break
 
-    # 1. Detect exact 4-digit year
+    # 1a. Compound season+year tokens: FW25, SS00, AW '93, Spring 25, FW25/26
+    #     Must run before the bare-digit passes so fused tokens aren't double-counted.
     year: Optional[int] = None
-    for m in _YEAR_RE.finditer(text):
-        y = int(m.group(1))
-        if 1985 <= y <= 2026:
-            year = y
-            text = text[: m.start()] + text[m.end():]
-            break  # take first qualifying year only
+    csm = _SEASON_YY_RE.search(text)
+    if csm:
+        raw_season = csm.group(1).lower()
+        raw_year_str = csm.group(2)
+        raw_year_int = int(raw_year_str)
+        if len(raw_year_str) == 4:
+            y4 = raw_year_int if 1985 <= raw_year_int <= 2026 else None
+        else:
+            y4 = _expand_2digit_year(raw_year_int)
+        if y4 is not None:
+            year = y4
+            sc = _SEASON_CODE_MAP.get(raw_season)
+            if sc and season_code is None:
+                season_code = sc
+            text = text[: csm.start()] + " " + text[csm.end():]
 
-    # 1b. Detect decade token ("90s", "2000s") — only if no exact year found
+    # 1. Detect exact 4-digit year (skip if already set by step 1a)
+    if year is None:
+        for m in _YEAR_RE.finditer(text):
+            y = int(m.group(1))
+            if 1985 <= y <= 2026:
+                year = y
+                text = text[: m.start()] + text[m.end():]
+                break
+
+    # 1b. Detect decade token ("90s", "2000s") — only if no year found yet
     if year is None and year_min is None:
         dm = _DECADE_RE.search(text)
         if dm:
             full = dm.group(1)
-            # "90s" → "90"; "2000s" → last two digits "00"; "2010s" → "10"
             decade_key = full[-2:] if len(full) >= 2 else full.zfill(2)
             if decade_key in _DECADE_RANGES:
                 year_min, year_max = _DECADE_RANGES[decade_key]
                 text = text[: dm.start()] + text[dm.end():]
 
     # 2. Detect brand (longest match wins to avoid 'Dior' shadowing 'Christian Dior')
-    # Era-locked brand overrides detection but detected brand still allowed to match
     brand: Optional[str] = brand_lock
     if not brand:
         brands = sorted(known_brands or [], key=lambda b: len(b), reverse=True)
@@ -112,36 +167,50 @@ def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> d
                 text = re.sub(re.escape(b), "", text, flags=re.IGNORECASE)
                 break
     else:
-        # Remove brand_lock name from text if present
         if known_brands:
             for b in sorted(known_brands or [], key=lambda b: len(b), reverse=True):
                 if b.lower() == (brand_lock or "").lower():
                     text = re.sub(re.escape(b), "", text, flags=re.IGNORECASE)
                     break
 
-    # 3. Detect season tokens (word by word; multi-word "ready-to-wear" treated as stop)
+    # 3. Detect season tokens word-by-word (fallback when not set by step 1a)
     text = re.sub(r"\bready[-\s]to[-\s]wear\b", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"\brtw\b", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"\bcollection\b", " ", text, flags=re.IGNORECASE)
 
-    season_code: Optional[str] = None
     tokens = text.split()
     kept: list = []
     for tok in tokens:
         clean = tok.strip(".,;:").lower()
         if clean in _SEASON_MAP:
             sc = _SEASON_MAP[clean]
-            if season_code and season_code != sc:
-                # conflicting signals — flag ambiguous, keep first
-                ambiguous.append(tok)
-            else:
+            if season_code is None:
                 season_code = sc
-            # drop this token from residual
+            elif season_code != sc:
+                ambiguous.append(tok)
+            # drop from residual either way
         else:
             kept.append(tok)
 
     residual = " ".join(kept)
     residual = re.sub(r"\s+", " ", residual).strip(" .,;")
+
+    # 3b. Bare 2-digit year — conservative: only commit when brand or season_code
+    #     gives unambiguous context.  27–84 is out of corpus; just leave in residual.
+    if year is None and year_min is None:
+        bm = _BARE_2DIGIT_RE.search(residual)
+        if bm:
+            yy = int(bm.group(1))
+            y4 = _expand_2digit_year(yy)
+            if y4 is not None:
+                if brand or season_code:
+                    year = y4
+                    residual = residual[: bm.start()] + residual[bm.end():]
+                    residual = re.sub(r"\s+", " ", residual).strip(" .,;")
+                else:
+                    # plausible year but no context — mark ambiguous, keep in residual
+                    ambiguous.append(bm.group(0))
+            # if y4 is None (27–84) leave silently in residual — not a year candidate
 
     return {
         "year": year,
