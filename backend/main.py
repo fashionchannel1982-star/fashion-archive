@@ -544,6 +544,7 @@ async def synthesize(req: SynthesizeRequest):
 
 class ExportRequest(BaseModel):
     moment_id: str
+    confidence: Optional[int] = None
 
 
 @app.post("/api/export")
@@ -579,6 +580,7 @@ async def export_moment(req: ExportRequest, bg: BackgroundTasks):
                 "timestamp_end": moment.timestamp_end,
                 "description": enriched.get("description") or moment.description,
                 "thumbnail_url": moment.thumbnail_url,
+                "confidence": req.confidence,
                 "garments": enriched.get("garments", []),
                 "colours": enriched.get("colours", []),
                 "silhouette": enriched.get("silhouette", ""),

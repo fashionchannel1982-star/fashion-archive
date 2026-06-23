@@ -340,7 +340,7 @@ function ResultCard({
   highlighted: boolean;
   onBookmark: (r: SearchResult) => void;
   onPin: (r: SearchResult) => void;
-  onExport: (momentId: string, brand: string, ts: number) => void;
+  onExport: (momentId: string, brand: string, ts: number, confidence?: number) => void;
   onPlay: (momentId: string) => void;
 }) {
   const isBookmarked = bookmarks.has(result.moment_id);
@@ -506,7 +506,7 @@ function ResultCard({
           </button>
 
           <button
-            onClick={() => onExport(result.moment_id, result.brand, result.timestamp_start)}
+            onClick={() => onExport(result.moment_id, result.brand, result.timestamp_start, result.confidence)}
             style={{
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.08)",
@@ -1018,12 +1018,12 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
-  const handleExport = async (momentId: string, brand: string, ts: number) => {
+  const handleExport = async (momentId: string, brand: string, ts: number, confidence?: number) => {
     try {
       const res = await fetch(`${API_URL}/api/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moment_id: momentId }),
+        body: JSON.stringify({ moment_id: momentId, confidence }),
       });
       const data = await res.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
