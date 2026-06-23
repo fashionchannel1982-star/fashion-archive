@@ -951,10 +951,13 @@ export default function Home() {
       if (data.results.length >= 3) {
         setSynthesizing(true);
         const topIds = data.results.slice(0, 8).map((r) => r.moment_id);
+        const synthAbort = new AbortController();
+        const synthTimer = setTimeout(() => synthAbort.abort(), 15000);
         fetch(`${API_URL}/api/synthesize`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: q, moment_ids: topIds }),
+          signal: synthAbort.signal,
         })
           .then((r) => r.json())
           .then((s) => {
@@ -962,7 +965,8 @@ export default function Home() {
             setSynthesizing(false);
             log("synthesis_impression", { query: q, grounded: s.grounded });
           })
-          .catch(() => setSynthesizing(false));
+          .catch(() => setSynthesizing(false))
+          .finally(() => clearTimeout(synthTimer));
       }
     } catch (err) {
       console.error(err);
