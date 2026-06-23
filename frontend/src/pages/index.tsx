@@ -15,14 +15,21 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const HERO_QUERY = "sheer black evening looks";
 
 // Locked demo chips — each verified to return ≥1 strong result (conf ≥75).
-// Do NOT add chips without probing first.
+// Order: concept → brand → motion → year/archive. Do NOT add without probing first.
 const CURATED_QUERIES = [
+  // concept
   "sheer black evening looks",
   "structured shoulders, sharp tailoring",
   "monochrome white, head to toe",
   "maximalist print colour runway",
+  // brand
   "Chanel tweed and tailoring",
   "Dior structured tailoring",
+  // motion
+  "a model pausing at the end of the runway",
+  // year / archive
+  "Chanel 1993",
+  // colour / statement
   "red dress",
 ];
 
