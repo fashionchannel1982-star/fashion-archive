@@ -12,7 +12,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 // CONSTANTS
 // ─────────────────────────────────────────
 
-const HERO_QUERY = "Dior structured tailoring";
+const HERO_QUERY = "sheer black evening looks";
 
 const CURATED_QUERIES = [
   "sheer black evening looks",
@@ -588,6 +588,7 @@ function VideoModal({
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
         if (cancelled || !videoRef.current) return;
+        if (!data.hls_url) throw new Error("no hls_url");
 
         const clipStart = data.timestamp_start;
         const clipEnd = Math.min(
@@ -687,7 +688,13 @@ function VideoModal({
 
         <div style={{ position: "relative", aspectRatio: "16/9", background: "#000" }}>
           {error ? (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-body)", fontSize: 13, color: "#8A8A85" }}>{error}</div>
+            <div style={{
+              position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center", gap: 8,
+            }}>
+              <span style={{ fontFamily: "var(--font-display)", fontSize: 16, letterSpacing: "0.1em", color: "#3A3A3A" }}>Clip unavailable</span>
+              <span style={{ fontFamily: "var(--font-body)", fontSize: 11, color: "#2A2A2A", letterSpacing: "0.04em" }}>The stream could not be loaded</span>
+            </div>
           ) : (
             <video ref={videoRef} controls style={{ width: "100%", height: "100%", display: "block" }} />
           )}
@@ -912,6 +919,7 @@ export default function Home() {
   const [heroResult, setHeroResult] = useState<SearchResult | null>(null);
   const [synthesis, setSynthesis] = useState<{ synthesis: string; grounded: boolean; cited_moment_ids: string[] } | null>(null);
   const [synthesizing, setSynthesizing] = useState(false);
+  const [searchError, setSearchError] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout>();
 
   // Load from localStorage on mount
@@ -958,17 +966,27 @@ export default function Home() {
       setResults([]);
       setWeakMatch(false);
       setSynthesis(null);
+      setSearchError(false);
       setHasSearched(false);
       return;
     }
     setLoading(true);
     setSynthesis(null);
+    setSearchError(false);
     try {
-      const res = await fetch(`${API_URL}/api/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q, limit: 20 }),
-      });
+      const searchAbort = new AbortController();
+      const searchTimer = setTimeout(() => searchAbort.abort(), 10000);
+      let res: Response;
+      try {
+        res = await fetch(`${API_URL}/api/search`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: q, limit: 20 }),
+          signal: searchAbort.signal,
+        });
+      } finally {
+        clearTimeout(searchTimer);
+      }
       const data: SearchResponse = await res.json();
       setResults(data.results);
       setWeakMatch(data.results.length > 0 && data.results.every((r) => r.confidence < 75));
@@ -999,6 +1017,9 @@ export default function Home() {
       }
     } catch (err) {
       console.error(err);
+      setSearchError(true);
+      setResults([]);
+      setHasSearched(true);
     } finally {
       setLoading(false);
     }
@@ -1242,6 +1263,19 @@ export default function Home() {
             </div>
           )}
         </div>
+
+        {/* Search error state */}
+        {hasSearched && searchError && (
+          <div style={{
+            maxWidth: 640, margin: "0 auto 20px", padding: "12px 20px",
+            borderRadius: 6, background: "#1A0000", border: "1px solid rgba(180,60,60,0.25)",
+            display: "flex", alignItems: "center", gap: 10,
+            fontFamily: "var(--font-body)", fontSize: 12, color: "#8A5555", letterSpacing: "0.03em",
+          }}>
+            <span style={{ fontSize: 14 }}>⚠</span>
+            Archive unreachable — check your connection and try again
+          </div>
+        )}
 
         {/* Weak match warning */}
         {hasSearched && weakMatch && (
