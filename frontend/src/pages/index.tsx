@@ -120,7 +120,10 @@ function formatTimestamp(seconds: number): string {
 function formatShowDate(iso: string | null | undefined): string {
   if (!iso) return "";
   try {
-    return new Date(iso).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+    // Parse parts to avoid UTC-midnight timezone shift (Oct 21 → Oct 20 in UTC-offset zones)
+    const parts = iso.split("-").map(Number);
+    const d = new Date(parts[0], (parts[1] || 1) - 1, 1);
+    return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   } catch {
     return "";
   }
