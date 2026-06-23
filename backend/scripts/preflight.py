@@ -112,9 +112,50 @@ else:
 total = len(results)
 passed = sum(results)
 print()
+
+# ── Screenshot capture (non-gating) ──────────────────────────────────────────
+# Requires frontend running at localhost:3000. Skips gracefully if not.
+CAPTURE_SCRIPT = os.path.join(REPO, "frontend", "scripts", "capture_shots.js")
+NODE = "node"
+FRONTEND_URL = "http://localhost:3000"
+SHOTS_ROOT = os.path.join(BACKEND, "preflight_shots")
+
+def _frontend_up(timeout: int = 3) -> bool:
+    try:
+        urllib.request.urlopen(FRONTEND_URL, timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+if not os.path.exists(CAPTURE_SCRIPT):
+    print(f"  –  Screenshots skipped (capture_shots.js not found)")
+elif not _frontend_up():
+    print(f"  –  Screenshots skipped (frontend not running at {FRONTEND_URL})")
+else:
+    import datetime
+    ts = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    shot_dir = os.path.join(SHOTS_ROOT, ts)
+    t0 = time.time()
+    try:
+        r = subprocess.run(
+            [NODE, CAPTURE_SCRIPT, shot_dir, FRONTEND_URL],
+            cwd=os.path.join(REPO, "frontend"),
+            capture_output=True, text=True, timeout=60,
+        )
+        elapsed = time.time() - t0
+        if r.returncode == 0:
+            print(f"  {GREEN}✓{RESET}  Screenshots saved → {shot_dir}  ({elapsed*1000:.0f}ms)")
+        else:
+            last = (r.stdout + r.stderr).strip().splitlines()[-1][:80] if (r.stdout + r.stderr).strip() else "unknown error"
+            print(f"  {RED}✗{RESET}  Screenshot capture failed: {last}")
+    except subprocess.TimeoutExpired:
+        print(f"  {RED}✗{RESET}  Screenshot capture timed out after 60s")
+    except FileNotFoundError:
+        print(f"  –  Screenshots skipped (node not found in PATH)")
+
 if all(results):
-    print(f"{GREEN}{BOLD}  All {total} checks passed.{RESET}\n")
+    print(f"\n{GREEN}{BOLD}  All {total} checks passed.{RESET}\n")
     sys.exit(0)
 else:
-    print(f"{RED}{BOLD}  {total - passed}/{total} checks FAILED.{RESET}\n")
+    print(f"\n{RED}{BOLD}  {total - passed}/{total} checks FAILED.{RESET}\n")
     sys.exit(1)
