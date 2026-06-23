@@ -211,9 +211,14 @@ async def _metadata_hybrid_search(
     from services.confidence import calibrate as cal
 
     year = meta["year"]
+    year_min = meta.get("year_min")
+    year_max = meta.get("year_max")
     brand = meta["brand"]
     season_code = meta["season_code"]
     residual = meta["residual"].strip()
+
+    # Any year constraint (exact, range, or era) → trust the filter; override confidence
+    has_year_filter = bool(year or year_min or year_max)
 
     # Build WHERE clauses
     clauses: list = ["m.embedding IS NOT NULL"]
@@ -222,6 +227,10 @@ async def _metadata_hybrid_search(
         clauses.append(f"s.brand ILIKE '{safe_brand}'")
     if year:
         clauses.append(f"s.year = {int(year)}")
+    if year_min and not year:
+        clauses.append(f"s.year >= {int(year_min)}")
+    if year_max and not year:
+        clauses.append(f"s.year <= {int(year_max)}")
     if season_code == "FW":
         clauses.append(
             "(s.season_type ILIKE '%AW%' OR s.season ILIKE '%fall%' "
@@ -296,7 +305,9 @@ async def _metadata_hybrid_search(
         if use_cosine:
             similarity = 1.0 - float(r.distance)
             score = round(similarity, 4)
-            confidence = cal(similarity)
+            # When a year filter constrains the pool, trust the filter over cosine;
+            # override to metadata confidence so results aren't suppressed by floor.
+            confidence = _METADATA_CONFIDENCE if has_year_filter else cal(similarity)
             match_type = "hybrid"
         else:
             score = 1.0
@@ -339,7 +350,10 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
 
     # Detect structural metadata tokens (year / brand / season)
     meta = parse_metadata_filters(req.query, known_brands=list(KNOWN_BRANDS))
-    has_structural = bool(meta["year"] or meta["season_code"] or meta["brand"])
+    has_structural = bool(
+        meta["year"] or meta.get("year_min") or meta.get("year_max")
+        or meta["season_code"] or meta["brand"]
+    )
 
     # Widen the candidate pool when structured attributes are present so re-ranking
     # has material to promote; otherwise use the requested limit directly.
@@ -399,11 +413,23 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
                 if not _is_valid_description(description):
                     continue
 
+                # Compute attribute boost before the floor check: a strong
+                # structured-attribute match (e.g. embellishment tags, gold colour)
+                # can rescue a moment whose raw cosine sits just below the floor.
+                boost = attribute_boost(enriched, attrs) if has_attrs else 0.0
+                effective_confidence = (
+                    calibrate(score + boost) if boost > 0 else confidence
+                )
+
                 # Apply calibrated confidence floor — skip for metadata matches
                 # (their confidence=97 is exact-filter-based, not a cosine score)
                 is_metadata_match = item.get("_match_type") == "metadata"
-                if not is_metadata_match and confidence < confidence_floor():
+                if not is_metadata_match and effective_confidence < confidence_floor():
                     continue
+
+                # Use the boosted confidence for display when it's higher
+                if boost > 0 and effective_confidence > confidence:
+                    confidence = effective_confidence
 
                 enriched_out = {
                     "garments": enriched.get("garments", []),
@@ -412,11 +438,12 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
                     "key_pieces": enriched.get("key_pieces", []),
                     "search_tags": enriched.get("search_tags", []),
                 }
-                boost = attribute_boost(enriched, attrs) if has_attrs else 0.0
 
+                from services.database import make_show_key
                 results.append({
                     "moment_id": moment.id,
                     "show_id": show.id,
+                    "show_key": make_show_key(show.brand, show.season),
                     "brand": show.brand,
                     "season": show.season,
                     "season_type": show.season_type,

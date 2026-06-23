@@ -561,3 +561,116 @@ class TestParseMetadataFilters:
             m = self.parse(q)
             assert m["year"] is None, f"year found in concept query: {q!r}"
             assert m["season_code"] is None, f"season found in concept query: {q!r}"
+
+    # ── Decade tokens ─────────────────────────────────────────────────────────
+
+    def test_decade_90s_gives_year_range(self):
+        m = self.parse("Chanel 90s archival tweed")
+        assert m["year"] is None, "exact year should not fire for decade token"
+        assert m["year_min"] is not None
+        assert m["year_max"] is not None
+        assert m["year_min"] <= 1993 <= m["year_max"], "1993 must be in 90s range"
+        assert m["year_max"] >= 2000, "Fall 2000 must be in soft 90s range"
+
+    def test_decade_2000s_gives_year_range(self):
+        m = self.parse("Dior 2000s minimalism")
+        assert m["year_min"] is not None
+        assert m["year_min"] <= 2000  # soft range starts at or before 2000
+        assert m["year_max"] is not None
+        assert m["year_max"] >= 2009
+
+    def test_decade_residual_strips_decade_token(self):
+        m = self.parse("Chanel 90s tweed blazer")
+        assert "90s" not in m["residual"], "decade token should be stripped from residual"
+
+    def test_exact_year_takes_priority_over_decade(self):
+        # "1993" is a 4-digit year, should take precedence
+        m = self.parse("Chanel 1993 tweed")
+        assert m["year"] == 1993
+        assert m["year_min"] is None
+
+    # ── Era tokens ────────────────────────────────────────────────────────────
+
+    def test_lagerfeld_era_locks_chanel_year_max(self):
+        m = self.parse("Karl Lagerfeld era Chanel bouclé")
+        assert m["brand"] == "Chanel"
+        assert m["year_max"] == 2018
+        assert m["year_min"] is None
+
+    def test_lagerfeld_era_without_explicit_brand(self):
+        m = self.parse("Lagerfeld era tweed and bouclé")
+        assert m["brand"] == "Chanel"
+        assert m["year_max"] == 2018
+
+    def test_era_residual_strips_era_phrase(self):
+        m = self.parse("Karl Lagerfeld era Chanel bouclé")
+        assert "lagerfeld" not in m["residual"].lower()
+        assert "karl" not in m["residual"].lower()
+
+    def test_has_structural_set_for_year_range(self):
+        m = self.parse("Chanel 90s archival tweed")
+        has_structural = bool(
+            m["year"] or m.get("year_min") or m.get("year_max")
+            or m["season_code"] or m["brand"]
+        )
+        assert has_structural, "decade query should trigger structural path"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# services/structured_match.py — accessories lexicon + attribute_boost
+# Step 1b: hardware/embellishment surfacing
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAccessoriesBoost:
+    @pytest.fixture(autouse=True)
+    def _fns(self):
+        from services.structured_match import parse_query_attributes, attribute_boost, ACCESSORIES
+        self.parse_attrs = parse_query_attributes
+        self.boost = attribute_boost
+        self.ACCESSORIES = ACCESSORIES
+
+    def test_hardware_detected_in_query(self):
+        attrs = self.parse_attrs("gold hardware embellishment evening")
+        assert "hardware" in attrs["accessories"]
+
+    def test_embellish_stem_detected(self):
+        attrs = self.parse_attrs("embellishment evening gown")
+        assert "embellish" in attrs["accessories"]
+
+    def test_chain_detected(self):
+        attrs = self.parse_attrs("gold chain belt evening look")
+        assert "chain" in attrs["accessories"]
+
+    def test_pearl_detected(self):
+        attrs = self.parse_attrs("pearl accessories classic femininity")
+        assert "pearl" in attrs["accessories"]
+
+    def test_no_accessories_in_generic_query(self):
+        attrs = self.parse_attrs("black structured shoulders")
+        assert attrs["accessories"] == []
+
+    def test_accessory_boost_fires_on_tag_match(self):
+        attrs = self.parse_attrs("gold hardware embellishment evening")
+        enriched = {
+            "colours": ["black", "gold"],
+            "search_tags": ["embellished neckline", "metallic trim"],
+        }
+        b = self.boost(enriched, attrs)
+        assert b > 0.0, "boost should fire when 'embellish' matches enriched tag"
+
+    def test_accessory_boost_zero_without_match(self):
+        attrs = self.parse_attrs("gold hardware embellishment evening")
+        enriched = {"colours": [], "search_tags": ["oversized coat", "wool lapels"]}
+        b = self.boost(enriched, attrs)
+        # Only gold colour might match if enriched has no gold — here it won't
+        assert b < 0.08  # no colour match either
+
+    def test_accessory_boost_respects_cap(self):
+        attrs = self.parse_attrs("gold embellishment pearl chain hardware")
+        enriched = {
+            "colours": ["gold"],
+            "search_tags": ["embellished clasp", "pearl chain belt", "hardware detail"],
+        }
+        b = self.boost(enriched, attrs)
+        from services.structured_match import _BOOST_CAP
+        assert b <= _BOOST_CAP

@@ -1,0 +1,769 @@
+{
+  "run_at": "20260623T061517Z",
+  "k": 5,
+  "server": "http://localhost:8000",
+  "golden": "/Users/fengze/Desktop/fashion-archive/backend/eval/golden_queries.yaml",
+  "validated_only": true,
+  "aggregates": {
+    "all": {
+      "n": 22,
+      "mean_precision_at_k": 0.3455,
+      "mean_recall_at_k": 0.7879,
+      "hit_rate_at_k": 0.9545
+    },
+    "validated": {
+      "n": 22,
+      "mean_precision_at_k": 0.3455,
+      "mean_recall_at_k": 0.7879,
+      "hit_rate_at_k": 0.9545
+    }
+  },
+  "rows": [
+    {
+      "query": "Chanel tweed blazer",
+      "kind": "brand",
+      "validated": true,
+      "expect": [
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__fall-2000-ready-to-wear",
+        "chanel__aw2016"
+      ],
+      "precision_at_k": 0.6,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 3,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "chanel__aw2019",
+        "chanel__aw2020",
+        "chanel__fall-2000-ready-to-wear",
+        "chanel__fall-2011-ready-to-wear",
+        "chanel__fall-2024-couture"
+      ],
+      "top_k_shows": [
+        "chanel__fall-2024-couture",
+        "chanel__fall-2000-ready-to-wear",
+        "chanel__aw2020",
+        "chanel__fall-2011-ready-to-wear",
+        "chanel__aw2019"
+      ],
+      "top_k_confidence": [
+        99,
+        99,
+        99,
+        98,
+        89
+      ]
+    },
+    {
+      "query": "Dior feminine tailoring",
+      "kind": "brand",
+      "validated": true,
+      "expect": [
+        "dior__fall-2024-ready-to-wear",
+        "dior__spring-2025-ready-to-wear",
+        "dior__spring-2024-ready-to-wear"
+      ],
+      "precision_at_k": 0.6,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 3,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "dior__fall-2024-ready-to-wear",
+        "dior__spring-2024-ready-to-wear",
+        "dior__spring-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "dior__fall-2024-ready-to-wear",
+        "dior__fall-2024-ready-to-wear",
+        "dior__fall-2024-ready-to-wear",
+        "dior__spring-2025-ready-to-wear",
+        "dior__spring-2024-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        74,
+        70,
+        68,
+        64,
+        62
+      ]
+    },
+    {
+      "query": "Vivienne Westwood corset",
+      "kind": "brand",
+      "validated": true,
+      "expect": [
+        "vivienne-westwood__fall-1993-ready-to-wear"
+      ],
+      "precision_at_k": 0.2,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 1,
+      "k": 5,
+      "expected_count": 1,
+      "retrieved_keys": [
+        "vivienne-westwood__fall-1993-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "vivienne-westwood__fall-1993-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        84,
+        67,
+        61
+      ]
+    },
+    {
+      "query": "Maison Margiela deconstructed couture",
+      "kind": "brand",
+      "validated": true,
+      "expect": [
+        "maison-margiela__fall-2025-couture"
+      ],
+      "precision_at_k": 0.2,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 1,
+      "k": 5,
+      "expected_count": 1,
+      "retrieved_keys": [
+        "maison-margiela__fall-2025-couture"
+      ],
+      "top_k_shows": [
+        "maison-margiela__fall-2025-couture",
+        "maison-margiela__fall-2025-couture",
+        "maison-margiela__fall-2025-couture",
+        "maison-margiela__fall-2025-couture",
+        "maison-margiela__fall-2025-couture"
+      ],
+      "top_k_confidence": [
+        92,
+        91,
+        90,
+        90,
+        88
+      ]
+    },
+    {
+      "query": "Valentino dramatic gown",
+      "kind": "brand",
+      "validated": true,
+      "expect": [
+        "valentino__fall-2025-ready-to-wear"
+      ],
+      "precision_at_k": 0.2,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 1,
+      "k": 5,
+      "expected_count": 1,
+      "retrieved_keys": [
+        "valentino__fall-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "valentino__fall-2025-ready-to-wear",
+        "valentino__fall-2025-ready-to-wear",
+        "valentino__fall-2025-ready-to-wear",
+        "valentino__fall-2025-ready-to-wear",
+        "valentino__fall-2025-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        97,
+        97,
+        96,
+        64,
+        63
+      ]
+    },
+    {
+      "query": "sheer black eveningwear",
+      "kind": "concept",
+      "validated": true,
+      "expect": [
+        "alexander-mcqueen__fall-2025-ready-to-wear",
+        "saint-laurent__fall-2025-ready-to-wear"
+      ],
+      "precision_at_k": 0.2,
+      "recall_at_k": 0.5,
+      "hit_at_k": 1,
+      "hits": 1,
+      "k": 5,
+      "expected_count": 2,
+      "retrieved_keys": [
+        "alexander-mcqueen__fall-2025-ready-to-wear",
+        "burberry__fall-2025-ready-to-wear",
+        "chanel__fall-2024-couture",
+        "versace__fall-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "burberry__fall-2025-ready-to-wear",
+        "chanel__fall-2024-couture",
+        "alexander-mcqueen__fall-2025-ready-to-wear",
+        "chanel__fall-2024-couture",
+        "versace__fall-2025-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        99,
+        99,
+        99,
+        99,
+        99
+      ]
+    },
+    {
+      "query": "monochrome minimalism",
+      "kind": "concept",
+      "validated": true,
+      "expect": [
+        "jil-sander__fall-2026-ready-to-wear",
+        "celine__fall-2025-ready-to-wear",
+        "prada__fall-2025-ready-to-wear"
+      ],
+      "precision_at_k": 0.2,
+      "recall_at_k": 0.3333,
+      "hit_at_k": 1,
+      "hits": 1,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "jil-sander__fall-2026-ready-to-wear",
+        "rick-owens__fall-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "rick-owens__fall-2025-ready-to-wear",
+        "rick-owens__fall-2025-ready-to-wear",
+        "jil-sander__fall-2026-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        71,
+        63,
+        61
+      ]
+    },
+    {
+      "query": "fur and texture maximalism",
+      "kind": "concept",
+      "validated": true,
+      "expect": [
+        "gucci__fall-2025-ready-to-wear",
+        "loewe__fall-2025-ready-to-wear",
+        "fendi__fall-2025-ready-to-wear"
+      ],
+      "precision_at_k": 0.6,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 3,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "fendi__fall-2025-ready-to-wear",
+        "gucci__fall-2025-ready-to-wear",
+        "loewe__fall-2025-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "vivienne-westwood__fall-2025-ready-to-wear",
+        "fendi__fall-2025-ready-to-wear",
+        "loewe__fall-2025-ready-to-wear",
+        "gucci__fall-2025-ready-to-wear",
+        "gucci__fall-2025-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        96,
+        96,
+        95,
+        95,
+        94
+      ]
+    },
+    {
+      "query": "pearl accessories and classic femininity",
+      "kind": "concept",
+      "validated": true,
+      "expect": [
+        "chanel__aw2016",
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__fall-2000-ready-to-wear"
+      ],
+      "precision_at_k": 0.6,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 3,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "chanel__aw2016",
+        "chanel__spring-1993-ready-to-wear",
+        "dior__spring-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__aw2016",
+        "chanel__aw2016",
+        "chanel__spring-1993-ready-to-wear",
+        "dior__spring-2025-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        88,
+        87,
+        85,
+        77,
+        70
+      ]
+    },
+    {
+      "query": "black leather jacket and boots",
+      "kind": "concept",
+      "validated": true,
+      "expect": [
+        "saint-laurent__fall-2025-ready-to-wear",
+        "versace__fall-2025-ready-to-wear",
+        "balenciaga__fall-2025-ready-to-wear"
+      ],
+      "precision_at_k": 0.2,
+      "recall_at_k": 0.3333,
+      "hit_at_k": 1,
+      "hits": 1,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "burberry__fall-2025-ready-to-wear",
+        "chanel__fall-2011-ready-to-wear",
+        "fendi__fall-2025-ready-to-wear",
+        "versace__fall-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "chanel__fall-2011-ready-to-wear",
+        "fendi__fall-2025-ready-to-wear",
+        "burberry__fall-2025-ready-to-wear",
+        "chanel__fall-2011-ready-to-wear",
+        "versace__fall-2025-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        100,
+        100,
+        100,
+        99,
+        99
+      ]
+    },
+    {
+      "query": "scarlet red tailoring",
+      "kind": "attribute",
+      "validated": true,
+      "expect": [
+        "valentino__fall-2025-ready-to-wear",
+        "versace__fall-2025-ready-to-wear",
+        "givenchy__fall-2025-ready-to-wear"
+      ],
+      "precision_at_k": 0.0,
+      "recall_at_k": 0.0,
+      "hit_at_k": 0,
+      "hits": 0,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "alexander-mcqueen__fall-2025-ready-to-wear",
+        "balenciaga__fall-2025-ready-to-wear",
+        "vivienne-westwood__fall-1993-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "vivienne-westwood__fall-2025-ready-to-wear",
+        "vivienne-westwood__fall-1993-ready-to-wear",
+        "alexander-mcqueen__fall-2025-ready-to-wear",
+        "balenciaga__fall-2025-ready-to-wear",
+        "vivienne-westwood__fall-1993-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        100,
+        99,
+        99,
+        99,
+        99
+      ]
+    },
+    {
+      "query": "red dress",
+      "kind": "attribute",
+      "validated": true,
+      "expect": [
+        "valentino__fall-2025-ready-to-wear",
+        "versace__fall-2025-ready-to-wear",
+        "balenciaga__fall-2025-ready-to-wear"
+      ],
+      "precision_at_k": 0.4,
+      "recall_at_k": 0.6667,
+      "hit_at_k": 1,
+      "hits": 2,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "balenciaga__fall-2025-ready-to-wear",
+        "chanel__aw2021",
+        "issey-miyake__fall-2025-ready-to-wear",
+        "valentino__fall-2025-ready-to-wear",
+        "vivienne-westwood__fall-1993-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "valentino__fall-2025-ready-to-wear",
+        "chanel__aw2021",
+        "balenciaga__fall-2025-ready-to-wear",
+        "vivienne-westwood__fall-1993-ready-to-wear",
+        "issey-miyake__fall-2025-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        100,
+        100,
+        100,
+        100,
+        99
+      ]
+    },
+    {
+      "query": "sculptural architectural pleating",
+      "kind": "attribute",
+      "validated": true,
+      "expect": [
+        "issey-miyake__fall-2025-ready-to-wear",
+        "maison-margiela__fall-2025-couture"
+      ],
+      "precision_at_k": 0.4,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 2,
+      "k": 5,
+      "expected_count": 2,
+      "retrieved_keys": [
+        "chanel__aw2020",
+        "issey-miyake__fall-2025-ready-to-wear",
+        "maison-margiela__fall-2025-couture"
+      ],
+      "top_k_shows": [
+        "issey-miyake__fall-2025-ready-to-wear",
+        "maison-margiela__fall-2025-couture",
+        "chanel__aw2020",
+        "chanel__aw2020",
+        "chanel__aw2020"
+      ],
+      "top_k_confidence": [
+        96,
+        86,
+        63,
+        63,
+        62
+      ]
+    },
+    {
+      "query": "oversized coat exaggerated lapels",
+      "kind": "attribute",
+      "validated": true,
+      "expect": [
+        "bottega-veneta__fall-2026-ready-to-wear",
+        "balenciaga__fall-2025-ready-to-wear",
+        "rick-owens__fall-2025-ready-to-wear"
+      ],
+      "precision_at_k": 0.4,
+      "recall_at_k": 0.6667,
+      "hit_at_k": 1,
+      "hits": 2,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "balenciaga__fall-2025-ready-to-wear",
+        "bottega-veneta__fall-2026-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "bottega-veneta__fall-2026-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear",
+        "balenciaga__fall-2025-ready-to-wear",
+        "bottega-veneta__fall-2026-ready-to-wear",
+        "balenciaga__fall-2025-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        100,
+        100,
+        100,
+        100,
+        100
+      ]
+    },
+    {
+      "query": "gold hardware embellishment evening",
+      "kind": "attribute",
+      "validated": true,
+      "expect": [
+        "versace__fall-2025-ready-to-wear",
+        "valentino__fall-2025-ready-to-wear",
+        "chanel__fall-2024-couture"
+      ],
+      "precision_at_k": 0.2,
+      "recall_at_k": 0.3333,
+      "hit_at_k": 1,
+      "hits": 1,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "chanel__spring-1993-ready-to-wear",
+        "dior__fall-2024-ready-to-wear",
+        "fendi__fall-2025-ready-to-wear",
+        "maison-margiela__fall-2025-couture"
+      ],
+      "top_k_shows": [
+        "chanel__spring-1993-ready-to-wear",
+        "maison-margiela__fall-2025-couture",
+        "dior__fall-2024-ready-to-wear",
+        "fendi__fall-2025-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        100,
+        100,
+        99,
+        99,
+        96
+      ]
+    },
+    {
+      "query": "Chanel 90s archival tweed suit",
+      "kind": "historical",
+      "validated": true,
+      "expect": [
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__fall-2000-ready-to-wear"
+      ],
+      "precision_at_k": 0.4,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 2,
+      "k": 5,
+      "expected_count": 2,
+      "retrieved_keys": [
+        "chanel__fall-2000-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__fall-2000-ready-to-wear",
+        "chanel__fall-2000-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        97,
+        97,
+        97,
+        97,
+        97
+      ]
+    },
+    {
+      "query": "Westwood 1993 punk corset",
+      "kind": "historical",
+      "validated": true,
+      "expect": [
+        "vivienne-westwood__fall-1993-ready-to-wear"
+      ],
+      "precision_at_k": 0.2,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 1,
+      "k": 5,
+      "expected_count": 1,
+      "retrieved_keys": [
+        "chanel__spring-1993-ready-to-wear",
+        "vivienne-westwood__fall-1993-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "vivienne-westwood__fall-1993-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        97,
+        97,
+        97,
+        97,
+        97
+      ]
+    },
+    {
+      "query": "Karl Lagerfeld era Chanel boucl\u00e9",
+      "kind": "historical",
+      "validated": true,
+      "expect": [
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__fall-2000-ready-to-wear",
+        "chanel__fall-2011-ready-to-wear"
+      ],
+      "precision_at_k": 0.6,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 3,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "chanel__aw2016",
+        "chanel__aw2017"
+      ],
+      "top_k_shows": [
+        "chanel__aw2016",
+        "chanel__aw2017",
+        "chanel__aw2017",
+        "chanel__aw2017",
+        "chanel__aw2017"
+      ],
+      "top_k_confidence": [
+        97,
+        97,
+        97,
+        97,
+        97
+      ]
+    },
+    {
+      "query": "tweed in motion runway walk",
+      "kind": "historical",
+      "validated": true,
+      "expect": [
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__fall-2000-ready-to-wear",
+        "chanel__aw2016"
+      ],
+      "precision_at_k": 0.6,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 3,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "chanel__aw2019",
+        "chanel__aw2022",
+        "loewe__fall-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "chanel__aw2019",
+        "chanel__aw2022",
+        "loewe__fall-2025-ready-to-wear",
+        "chanel__aw2019",
+        "chanel__aw2019"
+      ],
+      "top_k_confidence": [
+        96,
+        96,
+        94,
+        94,
+        94
+      ]
+    },
+    {
+      "query": "Chanel 1993",
+      "kind": "metadata",
+      "validated": true,
+      "expect": [
+        "chanel__spring-1993-ready-to-wear"
+      ],
+      "precision_at_k": 0.2,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 1,
+      "k": 5,
+      "expected_count": 1,
+      "retrieved_keys": [
+        "chanel__spring-1993-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__spring-1993-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        97,
+        97,
+        97,
+        97,
+        97
+      ]
+    },
+    {
+      "query": "Dior 2024",
+      "kind": "metadata",
+      "validated": true,
+      "expect": [
+        "dior__fall-2024-ready-to-wear",
+        "dior__spring-2024-ready-to-wear"
+      ],
+      "precision_at_k": 0.4,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 2,
+      "k": 5,
+      "expected_count": 2,
+      "retrieved_keys": [
+        "dior__fall-2024-ready-to-wear",
+        "dior__spring-2024-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "dior__spring-2024-ready-to-wear",
+        "dior__fall-2024-ready-to-wear",
+        "dior__spring-2024-ready-to-wear",
+        "dior__fall-2024-ready-to-wear",
+        "dior__spring-2024-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        97,
+        97,
+        97,
+        97,
+        97
+      ]
+    },
+    {
+      "query": "Fall 2025 tailoring",
+      "kind": "metadata",
+      "validated": true,
+      "expect": [
+        "dior__fall-2025-ready-to-wear",
+        "jacquemus__fall-2025-ready-to-wear"
+      ],
+      "precision_at_k": 0.2,
+      "recall_at_k": 0.5,
+      "hit_at_k": 1,
+      "hits": 1,
+      "k": 5,
+      "expected_count": 2,
+      "retrieved_keys": [
+        "givenchy__fall-2025-ready-to-wear",
+        "jacquemus__fall-2025-ready-to-wear",
+        "louis-vuitton__fall-2025-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "jacquemus__fall-2025-ready-to-wear",
+        "jacquemus__fall-2025-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear",
+        "louis-vuitton__fall-2025-ready-to-wear",
+        "givenchy__fall-2025-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        97,
+        97,
+        97,
+        97,
+        97
+      ]
+    }
+  ],
+  "errors": []
+}

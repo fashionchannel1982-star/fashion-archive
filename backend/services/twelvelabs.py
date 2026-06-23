@@ -397,13 +397,19 @@ async def semantic_search(
     # Extract brand from query so pgvector embeds visual terms only
     brand_filter, visual_query = extract_brand_from_query(query)
 
-    # Diversity cap: max moments returned per show to prevent one show dominating results.
-    # Only applied on concept queries (no brand filter); brand queries want depth in one brand.
-    _raw_cap = os.environ.get("MAX_MOMENTS_PER_SHOW", "3")
+    # Diversity caps: limit moments per show and per brand for concept queries.
+    # Brand queries (brand_filter set) bypass both caps — depth in one brand is desired.
+    _raw_show_cap = os.environ.get("MAX_MOMENTS_PER_SHOW", "3")
     try:
-        _diversity_cap = max(1, int(_raw_cap))
+        _diversity_cap = max(1, int(_raw_show_cap))
     except (TypeError, ValueError):
         _diversity_cap = 3
+
+    _raw_brand_cap = os.environ.get("MAX_MOMENTS_PER_BRAND", "4")
+    try:
+        _brand_cap = max(1, int(_raw_brand_cap))
+    except (TypeError, ValueError):
+        _brand_cap = 4
 
     # Try pgvector exact KNN path first (index dropped → always a full sequential scan,
     # which is sub-20ms for 3,280 vectors and guarantees the brand WHERE filter works).
@@ -441,16 +447,24 @@ async def semantic_search(
                 shows_map = {s.id: s for s in shows_rows.scalars().all()}
 
             results = []
-            per_show_count: dict = {}  # show_id → count (diversity cap)
+            per_show_count: dict = {}   # show_id → count
+            per_brand_count: dict = {}  # brand (lower) → count across all shows
             for r in pgvec_results:
                 similarity = 1.0 - float(r.distance)
                 if similarity < SIMILARITY_THRESHOLD:
                     continue
-                # Apply diversity cap only for concept queries (no brand filter)
+                # Apply diversity caps only for concept queries (no brand filter)
                 if not brand_filter:
                     show_count = per_show_count.get(r.show_id, 0)
                     if show_count >= _diversity_cap:
                         continue
+                    # Per-brand cap: prevents one house's multiple shows dominating
+                    show_obj = shows_map.get(r.show_id)
+                    brand_key = (show_obj.brand or "").lower() if show_obj else ""
+                    if brand_key:
+                        if per_brand_count.get(brand_key, 0) >= _brand_cap:
+                            continue
+                        per_brand_count[brand_key] = per_brand_count.get(brand_key, 0) + 1
                     per_show_count[r.show_id] = show_count + 1
                 show = shows_map.get(r.show_id)
                 results.append({

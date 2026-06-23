@@ -27,13 +27,36 @@ _SEASON_MAP: dict = {
 # Structural stop-words removed from residual (but not mapped to season)
 _STRUCTURAL_STOPS: frozenset = frozenset({"ready-to-wear", "rtw", "collection"})
 
+# Decade tokens: "90s" → (year_min, year_max).  Soft ±2 so "90s" includes Fall 2000.
+_DECADE_RE = re.compile(r"\b(\d{2,4})s\b", re.IGNORECASE)
+_DECADE_RANGES: dict = {
+    "60": (1958, 1971),
+    "70": (1968, 1981),
+    "80": (1978, 1991),
+    "90": (1988, 2001),
+    "00": (1998, 2011),
+    "10": (2008, 2021),
+    "20": (2018, 2029),
+}
+
+# Designer-era phrases → (brand_lock or None, year_min or None, year_max or None).
+# Matched case-insensitively as substrings before brand detection.
+_ERA_TOKENS: list = [
+    ("lagerfeld era", "Chanel", None, 2018),
+    ("karl lagerfeld", "Chanel", None, 2018),
+    ("virgil era", "Louis Vuitton", 2018, 2021),
+    ("mcqueen era", "Alexander McQueen", None, 2010),
+]
+
 
 def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> dict:
     """
     Parse structural metadata tokens from a free-text query.
 
     Returns a dict:
-      year:        int or None    — 4-digit year in range 1985–2026
+      year:        int or None    — exact 4-digit year in range 1985–2026
+      year_min:    int or None    — lower bound from a decade/era token
+      year_max:    int or None    — upper bound from a decade/era token
       brand:       str or None    — matched brand name (from known_brands)
       season_code: str or None    — 'FW', 'SS', or 'Couture'
       residual:    str            — query with structural tokens removed
@@ -41,8 +64,23 @@ def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> d
     """
     text = query
     ambiguous: list = []
+    year_min: Optional[int] = None
+    year_max: Optional[int] = None
 
-    # 1. Detect year
+    # 0. Era phrases (before year / brand detection; longest phrase first)
+    brand_lock: Optional[str] = None
+    for phrase, era_brand, era_min, era_max in sorted(
+        _ERA_TOKENS, key=lambda t: len(t[0]), reverse=True
+    ):
+        if phrase in text.lower():
+            brand_lock = era_brand
+            year_min = era_min
+            year_max = era_max
+            # Remove the era phrase from text
+            text = re.sub(re.escape(phrase), " ", text, flags=re.IGNORECASE)
+            break
+
+    # 1. Detect exact 4-digit year
     year: Optional[int] = None
     for m in _YEAR_RE.finditer(text):
         y = int(m.group(1))
@@ -51,15 +89,35 @@ def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> d
             text = text[: m.start()] + text[m.end():]
             break  # take first qualifying year only
 
+    # 1b. Detect decade token ("90s", "2000s") — only if no exact year found
+    if year is None and year_min is None:
+        dm = _DECADE_RE.search(text)
+        if dm:
+            full = dm.group(1)
+            # "90s" → "90"; "2000s" → last two digits "00"; "2010s" → "10"
+            decade_key = full[-2:] if len(full) >= 2 else full.zfill(2)
+            if decade_key in _DECADE_RANGES:
+                year_min, year_max = _DECADE_RANGES[decade_key]
+                text = text[: dm.start()] + text[dm.end():]
+
     # 2. Detect brand (longest match wins to avoid 'Dior' shadowing 'Christian Dior')
-    brand: Optional[str] = None
-    brands = sorted(known_brands or [], key=lambda b: len(b), reverse=True)
-    q_lower = text.lower()
-    for b in brands:
-        if b.lower() in q_lower:
-            brand = b
-            text = re.sub(re.escape(b), "", text, flags=re.IGNORECASE)
-            break
+    # Era-locked brand overrides detection but detected brand still allowed to match
+    brand: Optional[str] = brand_lock
+    if not brand:
+        brands = sorted(known_brands or [], key=lambda b: len(b), reverse=True)
+        q_lower = text.lower()
+        for b in brands:
+            if b.lower() in q_lower:
+                brand = b
+                text = re.sub(re.escape(b), "", text, flags=re.IGNORECASE)
+                break
+    else:
+        # Remove brand_lock name from text if present
+        if known_brands:
+            for b in sorted(known_brands or [], key=lambda b: len(b), reverse=True):
+                if b.lower() == (brand_lock or "").lower():
+                    text = re.sub(re.escape(b), "", text, flags=re.IGNORECASE)
+                    break
 
     # 3. Detect season tokens (word by word; multi-word "ready-to-wear" treated as stop)
     text = re.sub(r"\bready[-\s]to[-\s]wear\b", " ", text, flags=re.IGNORECASE)
@@ -87,6 +145,8 @@ def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> d
 
     return {
         "year": year,
+        "year_min": year_min,
+        "year_max": year_max,
         "brand": brand,
         "season_code": season_code,
         "residual": residual,
@@ -143,6 +203,13 @@ GARMENTS: frozenset = frozenset({
     "pants", "leggings", "culottes", "palazzo",
 })
 
+# Accessory / embellishment stems (matched as substrings in enriched tags)
+ACCESSORIES: frozenset = frozenset({
+    "hardware", "embellish", "chain", "clasp", "buckle", "medallion",
+    "pearl", "jewel", "bead", "sequin", "crystal", "rhinestone",
+    "brooch", "hardware", "zipper", "toggle", "hook",
+})
+
 SILHOUETTES: frozenset = frozenset({
     "structured", "oversized", "tailored", "draped", "voluminous",
     "fitted", "relaxed", "slim", "wide", "flared", "boxy", "cocoon",
@@ -158,7 +225,7 @@ def _tokens(text: str) -> list[str]:
 
 def parse_query_attributes(query: str) -> dict:
     """
-    Return {"colours": [...], "garments": [...], "silhouettes": [...]}
+    Return {"colours": [...], "garments": [...], "silhouettes": [...], "accessories": [...]}
     of lowercase tokens found in the query. Includes synonym expansions.
     """
     toks = set(_tokens(query))
@@ -174,7 +241,20 @@ def parse_query_attributes(query: str) -> dict:
     garments = [t for t in toks if t in GARMENTS]
     silhouettes = [t for t in toks if t in SILHOUETTES]
 
-    return {"colours": colours, "garments": garments, "silhouettes": silhouettes}
+    # Accessories: match query tokens as prefixes of ACCESSORIES stems
+    accessories: list[str] = []
+    q_lower = query.lower()
+    for stem in ACCESSORIES:
+        if stem in q_lower:
+            accessories.append(stem)
+    accessories = list(dict.fromkeys(accessories))
+
+    return {
+        "colours": colours,
+        "garments": garments,
+        "silhouettes": silhouettes,
+        "accessories": accessories,
+    }
 
 
 # ── Boost ─────────────────────────────────────────────────────────────────────
@@ -182,6 +262,7 @@ def parse_query_attributes(query: str) -> dict:
 _COLOUR_INC = 0.08
 _GARMENT_INC = 0.08
 _SILHOUETTE_INC = 0.05
+_ACCESSORY_INC = 0.06
 _BOOST_CAP = 0.20
 
 
@@ -234,5 +315,15 @@ def attribute_boost(enriched: dict, attrs: dict) -> float:
         ]))
         if silhouette_blob and _any_match(silhouettes_q, silhouette_blob):
             boost += _SILHOUETTE_INC
+
+    # Accessory match — check search_tags for hardware/embellishment/chain etc.
+    accessories_q = attrs.get("accessories") or []
+    if accessories_q:
+        tag_blob = " ".join(
+            (enriched.get("search_tags") or [])
+            + (enriched.get("key_pieces") or [])
+        ).lower()
+        if tag_blob and _any_match(accessories_q, tag_blob):
+            boost += _ACCESSORY_INC
 
     return min(boost, _BOOST_CAP)
