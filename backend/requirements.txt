@@ -10,6 +10,7 @@ tenacity==8.3.0
 twelvelabs>=1.2.7
 alembic
 sentry-sdk[fastapi]
+slowapi==0.1.10
 pytest
 httpx
 pytest-asyncio

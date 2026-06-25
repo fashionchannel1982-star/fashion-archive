@@ -14,12 +14,16 @@ Endpoints:
   POST /api/export
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import asyncio
 import time
 import os
@@ -32,6 +36,22 @@ load_dotenv()
 from services.confidence import calibrate, confidence_floor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ── Rate limiter (slowapi) ─────────────────────────────────────────────────────
+# Applied to /api/search to protect the Marengo embed API from concurrent spikes.
+# SEARCH_RATE_LIMIT env var overrides the default (e.g. "20/minute").
+_search_rate_limit = os.getenv("SEARCH_RATE_LIMIT", "30/minute")
+limiter = Limiter(key_func=get_remote_address, default_limits=[])
+
+# ── Admin auth dependency ──────────────────────────────────────────────────────
+# /api/admin/events requires a bearer token matching ADMIN_TOKEN env var.
+# If ADMIN_TOKEN is unset the endpoint is blocked entirely (fail-closed).
+_admin_token = os.getenv("ADMIN_TOKEN", "")
+_bearer_scheme = HTTPBearer(auto_error=True)
+
+def _require_admin(credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme)) -> None:
+    if not _admin_token or credentials.credentials != _admin_token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 # Sentry — no-op when SENTRY_DSN is unset; set it in prod to enable error tracking.
 _sentry_dsn = os.getenv("SENTRY_DSN", "")
@@ -57,6 +77,9 @@ app = FastAPI(
     redoc_url=None if _disable_docs else "/redoc",
     openapi_url=None if _disable_docs else "/openapi.json",
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _cors_origins = [
     o.strip()
@@ -394,7 +417,8 @@ async def _metadata_hybrid_search(
 
 
 @app.post("/api/search")
-async def search(req: SearchRequest, bg: BackgroundTasks):
+@limiter.limit(_search_rate_limit)
+async def search(request: Request, req: SearchRequest, bg: BackgroundTasks):
     """Semantic search across ingested moments via Twelve Labs."""
 
     start = time.time()
@@ -844,8 +868,8 @@ async def export_moodboard(req: MoodBoardExportRequest):
 # ─────────────────────────────────────────
 
 @app.get("/api/admin/events")
-async def admin_events(limit: int = 20):
-    """Internal endpoint: recent events + total count. Confirms signal capture is working."""
+async def admin_events(limit: int = 20, _: None = Depends(_require_admin)):
+    """Internal endpoint: recent events + total count. Requires Authorization: Bearer <ADMIN_TOKEN>."""
     from services.database import AsyncSessionLocal, Event
     from sqlalchemy import select, func
 
