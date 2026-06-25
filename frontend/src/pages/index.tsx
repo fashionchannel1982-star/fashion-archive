@@ -1439,44 +1439,62 @@ export default function Home() {
           </div>
         )}
 
-        {/* Synthesis line — shown ONLY when synthesis is grounded (non-null) */}
+        {/* Synthesis — centered pullquote, shown only when grounded */}
         {hasSearched && results.length > 0 && (synthesizing || synthesis?.grounded) && (
           <div style={{
-            maxWidth: 1280, margin: "0 auto 24px", padding: "0 32px",
-            animation: "fadeIn 0.4s ease",
+            display: "flex", justifyContent: "center",
+            padding: "0 32px 40px",
+            animation: "fadeIn 0.5s ease",
           }}>
             <div style={{
-              padding: "18px 24px",
-              borderLeft: "2px solid #C8A97A",
-              background: "rgba(200,169,122,0.04)",
-              borderRadius: "0 8px 8px 0",
+              width: "100%", maxWidth: 640,
+              display: "flex", flexDirection: "column", alignItems: "center",
+              textAlign: "center",
             }}>
+              {/* Gold hairline */}
               <div style={{
-                fontFamily: "var(--font-body)", fontSize: 9, letterSpacing: "0.16em",
-                color: "#C8A97A", textTransform: "uppercase", marginBottom: 10,
+                width: 32, height: 1,
+                background: "#C8A97A",
+                marginBottom: 16,
+              }} />
+
+              {/* Label */}
+              <div style={{
+                fontFamily: "var(--font-body)", fontSize: 9, letterSpacing: "0.2em",
+                color: "#C8A97A", textTransform: "uppercase", marginBottom: 14,
               }}>
                 Intelligence
               </div>
+
+              {/* Text or shimmer */}
               {synthesizing && !synthesis ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 2 }}>
+                <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
                   <div className="synth-shimmer" style={{
-                    height: 18, borderRadius: 2, width: "88%",
-                    background: "rgba(200,169,122,0.12)",
+                    height: 20, borderRadius: 2, width: "80%",
+                    background: "rgba(200,169,122,0.10)",
                   }} />
                   <div className="synth-shimmer" style={{
-                    height: 18, borderRadius: 2, width: "62%",
-                    background: "rgba(200,169,122,0.07)",
-                    animationDelay: "0.25s",
+                    height: 20, borderRadius: 2, width: "55%",
+                    background: "rgba(200,169,122,0.06)",
+                    animationDelay: "0.2s",
                   }} />
                 </div>
               ) : (
                 <div style={{
-                  fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 300,
-                  color: "#EDE8DC", lineHeight: 1.65, letterSpacing: "0.02em", fontStyle: "italic",
+                  fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 300,
+                  color: "#EDE8DC", lineHeight: 1.7, letterSpacing: "0.03em",
+                  fontStyle: "italic",
                 }}>
                   {synthesis?.synthesis}
                 </div>
               )}
+
+              {/* Gold hairline below */}
+              <div style={{
+                width: 32, height: 1,
+                background: "rgba(200,169,122,0.35)",
+                marginTop: 16,
+              }} />
             </div>
           </div>
         )}
