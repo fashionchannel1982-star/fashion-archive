@@ -1217,7 +1217,7 @@ export default function Home() {
               type="text"
               value={query}
               onChange={handleInput}
-              placeholder="Search the archive…"
+              placeholder="Type anything — house, era, colour, silhouette…"
               autoFocus
               style={{
                 width: "100%", background: "#141414",
@@ -1243,13 +1243,18 @@ export default function Home() {
             )}
           </div>
 
-          {/* Curated query chips — show when no active search */}
+          {/* Suggestion chips — show when no active search */}
           {!hasSearched && (
             <div style={{
-              display: "flex", gap: 8, flexWrap: "wrap",
+              display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
               justifyContent: "center", marginTop: 20,
               animation: "fadeIn 0.5s ease 0.2s both",
             }}>
+              <span style={{
+                fontFamily: "var(--font-body)", fontSize: 11,
+                color: "#3E3E3C", letterSpacing: "0.08em", textTransform: "uppercase",
+                marginRight: 4,
+              }}>Try:</span>
               {CURATED_QUERIES.map((chip) => (
                 <button
                   key={chip}
@@ -1382,15 +1387,26 @@ export default function Home() {
               fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 300,
               color: "#8A8A85", marginBottom: 10, letterSpacing: "0.02em",
             }}>
-              Nothing found in the archive
+              Nothing matched in the archive
             </div>
             <div style={{
               fontFamily: "var(--font-body)", fontSize: 12, color: "#444",
-              letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 36,
+              letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8,
             }}>
-              Try a different search, or explore the archive below
+              Try free-typing anything — house, year, colour, silhouette
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+            <div style={{
+              fontFamily: "var(--font-body)", fontSize: 11, color: "#3A3A38",
+              letterSpacing: "0.04em", marginBottom: 36,
+            }}>
+              "chanel" · "red dress" · "90s minimalism" · "Valentino gown"
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>
+              <span style={{
+                fontFamily: "var(--font-body)", fontSize: 11,
+                color: "#3E3E3C", letterSpacing: "0.08em", textTransform: "uppercase",
+                marginRight: 4,
+              }}>Try:</span>
               {CURATED_QUERIES.map((chip) => (
                 <button
                   key={chip}

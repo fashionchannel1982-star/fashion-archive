@@ -278,6 +278,10 @@ async def _metadata_hybrid_search(
     elif is_bare_brand:
         # ROW_NUMBER per show gives at most 2 moments per show, then Python round-robin.
         # This avoids the UUID-ordering problem of ORDER BY show_id + LIMIT.
+        # rn cap: enough per show so that even one-show brands (e.g. Gucci 2 shows)
+        # return the full requested limit; ceil(limit / min_expected_shows ≈ 1) = limit.
+        # Capped at limit so we never pull an entire show unnecessarily.
+        _rn_cap = limit
         sql = f"""
             SELECT id, show_id, timestamp_start, timestamp_end, description,
                    thumbnail_url, NULL AS distance
@@ -291,7 +295,7 @@ async def _metadata_hybrid_search(
                 JOIN shows s ON s.id = m.show_id
                 WHERE {where}
             ) _ranked
-            WHERE rn <= 2
+            WHERE rn <= {_rn_cap}
         """
         use_cosine = False
     else:
@@ -353,10 +357,11 @@ async def _metadata_hybrid_search(
         if use_cosine:
             similarity = 1.0 - float(r.distance)
             score = round(similarity, 4)
-            # When a year filter constrains the pool, trust the filter over cosine;
-            # override to metadata confidence so results aren't suppressed by floor.
-            confidence = _METADATA_CONFIDENCE if has_year_filter else cal(similarity)
-            match_type = "hybrid"
+            # Hybrid: use real KNN confidence so the concept ranks within the filtered set.
+            # Floor is NOT applied for filtered hybrid results — the metadata filter already
+            # constrains relevance; the concept only ranks, it should not discard everything.
+            confidence = cal(similarity)
+            match_type = "hybrid_filtered"
         else:
             score = 1.0
             confidence = _METADATA_CONFIDENCE
@@ -415,6 +420,14 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
     #   else → normal semantic on full query
     if has_structural:
         tl_results = await _metadata_hybrid_search(meta, limit=candidate_limit)
+        # Progressive relaxation: if concept+filter combo is too tight, retry without
+        # the concept (pure metadata), then without season, keeping brand/year as last resort.
+        if not tl_results and meta["residual"].strip():
+            relaxed = dict(meta, residual="")
+            tl_results = await _metadata_hybrid_search(relaxed, limit=candidate_limit)
+        if not tl_results and meta["season_code"]:
+            relaxed = dict(meta, residual="", season_code=None)
+            tl_results = await _metadata_hybrid_search(relaxed, limit=candidate_limit)
     elif cross_house:
         embed_query = meta["residual"].strip() or req.query
         tl_results = await twelvelabs.semantic_search(
@@ -435,6 +448,12 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
         }
 
     results = []
+    # hybrid_filtered items that fail the floor are kept as fallback: if the entire
+    # filtered set falls below the floor (e.g. "90s minimalism" where the era is
+    # constrained but no moments score ≥60 for a style concept), these are returned
+    # sorted by confidence rather than returning empty.
+    soft_results: list = []
+
     async with AsyncSessionLocal() as session:
         for item in tl_results:
             score = item.get("score", 0.0)
@@ -478,11 +497,23 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
                     calibrate(score + boost) if boost > 0 else confidence
                 )
 
-                # Apply calibrated confidence floor — skip for metadata matches
-                # (their confidence=97 is exact-filter-based, not a cosine score)
-                is_metadata_match = item.get("_match_type") == "metadata"
-                if not is_metadata_match and effective_confidence < confidence_floor():
-                    continue
+                # Apply calibrated confidence floor:
+                # - "metadata": exact filter match, conf=97, never filtered
+                # - "hybrid_filtered": concept ranks within a metadata-filtered set;
+                #   floor applies so concept qualifiers narrow (e.g. "chanel 1993 red"
+                #   drops non-red moments), but failures are kept in soft_results as a
+                #   fallback if the full filtered set falls below floor.
+                # - anything else (pure semantic): floor applies, no fallback
+                match_type_raw = item.get("_match_type", "")
+                is_metadata_only = match_type_raw == "metadata"
+                is_hybrid_filtered = match_type_raw == "hybrid_filtered"
+
+                if not is_metadata_only and effective_confidence < confidence_floor():
+                    if is_hybrid_filtered:
+                        # Keep for potential fallback (avoids total-empty on style concepts)
+                        pass  # falls through to result build below, added to soft_results
+                    else:
+                        continue  # pure semantic — hard discard
 
                 # Use the boosted confidence for display when it's higher
                 if boost > 0 and effective_confidence > confidence:
@@ -497,7 +528,7 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
                 }
 
                 from services.database import make_show_key
-                results.append({
+                result_item = {
                     "moment_id": moment.id,
                     "show_id": show.id,
                     "show_key": make_show_key(show.brand, show.season),
@@ -511,14 +542,24 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
                     "thumbnail_url": moment.thumbnail_url or item.get("thumbnail_url"),
                     "confidence": confidence,
                     "score_raw": round(score, 4),
-                    "match_type": item.get("_match_type", "semantic"),
+                    "match_type": "hybrid" if is_hybrid_filtered else item.get("_match_type", "semantic"),
                     "_boost": round(boost, 3),      # QA field
                     "_rank_score": score + boost,
                     "creative_director": show.creative_director,
                     "show_date": show.show_date.isoformat() if show.show_date else None,
                     "source": show.source,
                     "enriched": enriched_out,
-                })
+                }
+
+                if is_hybrid_filtered and effective_confidence < confidence_floor():
+                    soft_results.append(result_item)
+                else:
+                    results.append(result_item)
+
+    # Fallback: if filtered concept query yielded nothing above floor (e.g. "90s minimalism"),
+    # surface the soft (sub-floor) filtered results sorted by confidence.
+    if not results and soft_results:
+        results = sorted(soft_results, key=lambda r: r["confidence"], reverse=True)
 
     # Re-rank and truncate when structured attributes are present
     if has_attrs and results:

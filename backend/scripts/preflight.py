@@ -97,7 +97,56 @@ if "refused" in detail.lower() or "timed out" in detail.lower() or "timeout" in 
 else:
     check("Backend health (http://localhost:8000)", ok, t, detail)
 
-# 5. Eval harness smoke (skip if server not running)
+# 5. Battery gate: all real-user queries return ≥1 result + funnel monotonic
+_BATTERY = [
+    "chanel", "dior", "gucci",
+    "red dress", "black dress", "1993", "90s minimalism",
+    "black sheer across houses", "Valentino red gown", "structured tailoring",
+]
+_FUNNEL = ["chanel", "chanel 1993", "chanel 1993 red"]
+
+def _search(query, limit=20):
+    import json
+    payload = json.dumps({"query": query, "limit": limit}).encode()
+    req = urllib.request.Request(
+        "http://localhost:8000/api/search",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+if ok:
+    t0_bat = time.time()
+    try:
+        empty_queries = []
+        for q in _BATTERY:
+            data = _search(q, limit=20)
+            if data.get("total", 0) == 0:
+                empty_queries.append(q)
+
+        funnel_counts = []
+        for q in _FUNNEL:
+            data = _search(q, limit=50)
+            funnel_counts.append(data.get("total", 0))
+
+        funnel_ok = all(funnel_counts[i] >= funnel_counts[i+1] for i in range(len(funnel_counts)-1))
+        battery_ok = len(empty_queries) == 0 and funnel_ok
+
+        elapsed_bat = time.time() - t0_bat
+        detail_bat = ""
+        if empty_queries:
+            detail_bat = f"EMPTY: {', '.join(empty_queries)}"
+        if not funnel_ok:
+            detail_bat += f"  FUNNEL broken: {funnel_counts}"
+        check("Battery: all ≥1 result + funnel narrows", battery_ok, elapsed_bat, detail_bat)
+    except Exception as e:
+        check("Battery gate", False, time.time() - t0_bat, str(e))
+else:
+    print(f"  {'–':1}  {'Battery gate (skipped — server not running)':45} {'skip':>8}")
+
+# 6. Eval harness smoke (skip if server not running)
 if ok:
     eval_cmd = [_python(), "eval/run_eval.py", "--server", "http://localhost:8000", "--validated-only"]
     if not EVAL_FULL:

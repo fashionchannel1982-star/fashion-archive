@@ -291,3 +291,90 @@ queries:
       Year + season + residual concept hybrid. Filter: year=2025, season_code=FW.
       KNN on residual "tailoring". Pipeline confirms Jacquemus in top-5 (conf 76).
       Dior Fall 2025 is a canonical tailoring show and should rank; added as expected.
+
+
+  # ── REAL-USER BATTERY (gate: all must return ≥1 result) ──────────────────
+
+  - query: "chanel"
+    expect:
+      - chanel__fall-2000-ready-to-wear
+      - chanel__spring-1993-ready-to-wear
+    kind: battery
+    validated: true
+    notes: >
+      Bare brand. Must return ≥1 result from any Chanel show. Diverse across shows.
+
+  - query: "dior"
+    expect:
+      - dior__fall-2025-ready-to-wear
+      - dior__spring-2024-ready-to-wear
+    kind: battery
+    validated: true
+    notes: >
+      Bare brand. Must return ≥1 Dior result.
+
+  - query: "gucci"
+    expect:
+      - gucci__fall-2025-ready-to-wear
+    kind: battery
+    validated: true
+    notes: >
+      Bare brand (small index). Must return ≥1 Gucci result.
+
+  - query: "red dress"
+    expect:
+      - valentino__fall-2025-ready-to-wear
+    kind: battery
+    validated: true
+    notes: >
+      Core concept query. Valentino in top results, conf ≥75.
+
+  - query: "black dress"
+    expect:
+      - dior__fall-2025-ready-to-wear
+    kind: battery
+    validated: true
+    notes: >
+      Core concept query. Any dark evening house suffices.
+
+  - query: "1993"
+    expect:
+      - chanel__spring-1993-ready-to-wear
+      - vivienne-westwood__fall-1993-ready-to-wear
+    kind: battery
+    validated: true
+    notes: >
+      Bare year. Both 1993 shows must appear.
+
+  - query: "90s minimalism"
+    expect:
+      - chanel__spring-1993-ready-to-wear
+    kind: battery
+    validated: true
+    notes: >
+      Era + concept hybrid. Must return ≥1 result (90s era constrains; minimalism ranks).
+
+  - query: "black sheer across houses"
+    expect:
+      - chanel__fall-2000-ready-to-wear
+      - dior__spring-2024-ready-to-wear
+    kind: battery
+    validated: true
+    notes: >
+      Meta-phrase stripped; embeds "black sheer". Cross-house diversity forced.
+
+  - query: "Valentino red gown"
+    expect:
+      - valentino__fall-2025-ready-to-wear
+    kind: battery
+    validated: true
+    notes: >
+      Brand + concept. Valentino must appear.
+
+  - query: "structured tailoring"
+    expect:
+      - jacquemus__fall-2025-ready-to-wear
+    kind: battery
+    validated: true
+    notes: >
+      Core concept. Any house with strong tailoring should appear.
