@@ -247,6 +247,11 @@ async def _metadata_hybrid_search(
 
     where = " AND ".join(clauses)
 
+    # Bare brand: brand-only, no year/season/concept → apply show diversity below
+    is_bare_brand = bool(
+        brand and not residual and not has_year_filter and not season_code
+    )
+
     query_vec = None
     vec_str = ""
     if residual:
@@ -270,6 +275,25 @@ async def _metadata_hybrid_search(
             LIMIT {limit * 3}
         """
         use_cosine = True
+    elif is_bare_brand:
+        # ROW_NUMBER per show gives at most 2 moments per show, then Python round-robin.
+        # This avoids the UUID-ordering problem of ORDER BY show_id + LIMIT.
+        sql = f"""
+            SELECT id, show_id, timestamp_start, timestamp_end, description,
+                   thumbnail_url, NULL AS distance
+            FROM (
+                SELECT m.id, m.show_id, m.timestamp_start, m.timestamp_end,
+                       m.description, m.thumbnail_url,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY m.show_id ORDER BY m.timestamp_start
+                       ) AS rn
+                FROM moments m
+                JOIN shows s ON s.id = m.show_id
+                WHERE {where}
+            ) _ranked
+            WHERE rn <= 2
+        """
+        use_cosine = False
     else:
         sql = f"""
             SELECT m.id, m.show_id, m.timestamp_start, m.timestamp_end,
@@ -288,6 +312,30 @@ async def _metadata_hybrid_search(
 
     if not rows:
         return []
+
+    # Bare brand: round-robin across shows so the house is browseable, not monotone
+    if is_bare_brand and rows:
+        show_buckets: dict = {}
+        for r in rows:
+            key = str(r.show_id)
+            if key not in show_buckets:
+                show_buckets[key] = []
+            show_buckets[key].append(r)
+        diverse: list = []
+        show_lists = list(show_buckets.values())
+        i = 0
+        while len(diverse) < limit:
+            added_this_pass = False
+            for sl in show_lists:
+                if i < len(sl):
+                    diverse.append(sl[i])
+                    added_this_pass = True
+                    if len(diverse) >= limit:
+                        break
+            if not added_this_pass:
+                break
+            i += 1
+        rows = diverse
 
     # Load shows
     show_ids = list({r.show_id for r in rows})
@@ -354,15 +402,24 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
         meta["year"] or meta.get("year_min") or meta.get("year_max")
         or meta["season_code"] or meta["brand"]
     )
+    cross_house = meta.get("cross_house", False)
 
     # Widen the candidate pool when structured attributes are present so re-ranking
     # has material to promote; otherwise use the requested limit directly.
     _MAX_CANDIDATE = 150
     candidate_limit = min(req.limit * 3, _MAX_CANDIDATE) if has_attrs else req.limit
 
-    # Route: hybrid metadata path when structural tokens detected, else normal semantic path
+    # Route:
+    #   structural tokens (year/brand/season) → metadata hybrid path
+    #   cross-house phrase ("across houses", "vs", etc.) → semantic on stripped concept
+    #   else → normal semantic on full query
     if has_structural:
         tl_results = await _metadata_hybrid_search(meta, limit=candidate_limit)
+    elif cross_house:
+        embed_query = meta["residual"].strip() or req.query
+        tl_results = await twelvelabs.semantic_search(
+            embed_query, limit=candidate_limit, cross_house=True
+        )
     else:
         tl_results = await twelvelabs.semantic_search(req.query, limit=candidate_limit)
 

@@ -63,6 +63,15 @@ _DECADE_RANGES: dict = {
     "20": (2018, 2029),
 }
 
+# Cross-house / comparison phrases that signal brand diversity intent.
+# Matched before brand detection; stripped from the query so the residual
+# embeds only the visual concept.  Their presence sets cross_house=True.
+_META_PHRASE_RE = re.compile(
+    r"\b(across\s+(?:houses|brands)|over\s+the\s+decades?|evolution\s+of"
+    r"|compar(?:e[sd]?|ing)|vs\.?|versus|through\s+the\s+(?:years?|decades?))\b",
+    re.IGNORECASE,
+)
+
 # Designer-era phrases → (brand_lock or None, year_min or None, year_max or None).
 # Matched case-insensitively as substrings before brand detection.
 _ERA_TOKENS: list = [
@@ -105,6 +114,12 @@ def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> d
     year_min: Optional[int] = None
     year_max: Optional[int] = None
     season_code: Optional[str] = None  # may be set by step 1a before brand detection
+
+    # 0a. Meta-phrases: cross-house/comparison intent (strip before embedding)
+    cross_house = bool(_META_PHRASE_RE.search(text))
+    if cross_house:
+        text = _META_PHRASE_RE.sub(" ", text)
+        text = re.sub(r"\s+", " ", text).strip()
 
     # 0. Era phrases (before year / brand detection; longest phrase first)
     brand_lock: Optional[str] = None
@@ -220,6 +235,7 @@ def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> d
         "season_code": season_code,
         "residual": residual,
         "ambiguous": ambiguous,
+        "cross_house": cross_house,
     }
 
 

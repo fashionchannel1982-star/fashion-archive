@@ -801,3 +801,56 @@ class TestBare2DigitYear:
         m = self.parse("Fall 25 collection")
         assert m["year"] == 2025
         assert m["season_code"] == "FW"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# services/structured_match.py — meta-phrase / cross-house detection
+# Feature: "across houses", "vs", "evolution of" strip + cross_house flag
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.unit
+class TestMetaPhraseDetection:
+    @pytest.fixture(autouse=True)
+    def _fn(self):
+        from services.structured_match import parse_metadata_filters
+        self.parse = lambda q: parse_metadata_filters(q, known_brands=["Chanel", "Dior", "Gucci"])
+
+    def test_across_houses_sets_cross_house(self):
+        m = self.parse("black sheer across houses")
+        assert m["cross_house"] is True
+
+    def test_across_houses_stripped_from_residual(self):
+        m = self.parse("black sheer across houses")
+        assert "across" not in m["residual"]
+        assert "black sheer" in m["residual"]
+
+    def test_across_brands_sets_cross_house(self):
+        m = self.parse("structured shoulders across brands")
+        assert m["cross_house"] is True
+
+    def test_vs_sets_cross_house(self):
+        m = self.parse("Chanel vs Dior tailoring")
+        assert m["cross_house"] is True
+
+    def test_evolution_of_sets_cross_house(self):
+        m = self.parse("evolution of the little black dress")
+        assert m["cross_house"] is True
+
+    def test_over_the_decades_sets_cross_house(self):
+        m = self.parse("tweed over the decades")
+        assert m["cross_house"] is True
+
+    def test_plain_concept_no_cross_house(self):
+        m = self.parse("black sheer evening looks")
+        assert m["cross_house"] is False
+
+    def test_bare_brand_no_cross_house(self):
+        m = self.parse("chanel")
+        assert m["cross_house"] is False
+
+    def test_cross_house_does_not_strip_brand(self):
+        # When brand AND meta-phrase present, brand is still detected
+        m = self.parse("Chanel vs Dior")
+        assert m["cross_house"] is True
+        # brand may be Chanel (first match) — the point is cross_house fires
+        assert m["brand"] is not None

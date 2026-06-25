@@ -386,6 +386,7 @@ async def semantic_search(
     query: str,
     limit: int = 20,
     filters: Optional[dict] = None,
+    cross_house: bool = False,
 ) -> list:
     """
     Semantic search. Uses pgvector cosine similarity when embeddings exist,
@@ -410,6 +411,9 @@ async def semantic_search(
         _brand_cap = max(1, int(_raw_brand_cap))
     except (TypeError, ValueError):
         _brand_cap = 4
+    # Cross-house queries: cap at 2 per brand so results spread across more houses
+    if cross_house:
+        _brand_cap = min(_brand_cap, 2)
 
     # Try pgvector exact KNN path first (index dropped → always a full sequential scan,
     # which is sub-20ms for 3,280 vectors and guarantees the brand WHERE filter works).
