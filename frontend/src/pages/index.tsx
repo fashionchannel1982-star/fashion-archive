@@ -3,7 +3,7 @@
  * Apple TV aesthetic × Google search simplicity
  */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import type Hls from "hls.js";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -934,40 +934,65 @@ function BookmarkPanel({ bookmarks, onRemove, onClose }: {
 }
 
 // ─────────────────────────────────────────
-// SHARED CHIP ROW — "Try:" label + suggestion buttons
-// Single source of truth; used in landing state, no-results state, anywhere chips appear.
+// EXPLORE PANEL — single button reveals a clean list of demo queries.
 // ─────────────────────────────────────────
 
-function SuggestionChips({ onChipClick, animate }: { onChipClick: (chip: string) => void; animate?: boolean }) {
+function ExplorePanel({ onChipClick }: { onChipClick: (chip: string) => void }) {
+  const [open, setOpen] = React.useState(false);
   return (
-    <div style={{
-      display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
-      justifyContent: "center",
-      ...(animate ? { animation: "fadeIn 0.5s ease 0.2s both" } : {}),
-    }}>
-      <span style={{
-        fontFamily: "var(--font-body)", fontSize: 11,
-        color: "#3E3E3C", letterSpacing: "0.08em", textTransform: "uppercase",
-        marginRight: 4,
-      }}>Try:</span>
-      {CURATED_QUERIES.map((chip) => (
-        <button
-          key={chip}
-          onClick={() => onChipClick(chip)}
-          style={{
-            background: "none",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 100, padding: "6px 14px", cursor: "pointer",
-            fontFamily: "var(--font-body)", fontSize: 12,
-            color: "#8A8A85", letterSpacing: "0.03em",
-            transition: "color 0.15s, border-color 0.15s",
-          }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#EDE8DC"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(237,232,220,0.25)"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#8A8A85"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
-        >
-          {chip}
-        </button>
-      ))}
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          background: "none", border: "none", cursor: "pointer",
+          fontFamily: "var(--font-body)", fontSize: 12,
+          color: open ? "#EDE8DC" : "#3E3E3C",
+          letterSpacing: "0.08em", textTransform: "uppercase",
+          padding: "8px 0",
+          transition: "color 0.2s",
+        }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#8A8A85"; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = open ? "#EDE8DC" : "#3E3E3C"; }}
+      >
+        Explore {open ? "↑" : "↓"}
+      </button>
+
+      {open && (
+        <div style={{
+          display: "flex", flexDirection: "column", gap: 0,
+          width: "100%", maxWidth: 400,
+          border: "1px solid rgba(255,255,255,0.06)",
+          borderRadius: 8, overflow: "hidden",
+          animation: "fadeIn 0.15s ease",
+        }}>
+          {CURATED_QUERIES.map((q, i) => (
+            <button
+              key={q}
+              onClick={() => { setOpen(false); onChipClick(q); }}
+              style={{
+                background: "none",
+                border: "none",
+                borderTop: i > 0 ? "1px solid rgba(255,255,255,0.04)" : "none",
+                padding: "12px 20px",
+                textAlign: "left", cursor: "pointer",
+                fontFamily: "var(--font-body)", fontSize: 13,
+                color: "#8A8A85",
+                transition: "background 0.12s, color 0.12s",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.background = "#1C1C1C";
+                (e.currentTarget as HTMLElement).style.color = "#F5F5F0";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.background = "none";
+                (e.currentTarget as HTMLElement).style.color = "#8A8A85";
+              }}
+            >
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1380,10 +1405,10 @@ export default function Home() {
             )}
           </div>
 
-          {/* Suggestion chips — show when no active search */}
+          {/* Explore panel — single button, hidden until clicked */}
           {!hasSearched && (
-            <div style={{ marginTop: 20 }}>
-              <SuggestionChips onChipClick={handleChipClick} animate />
+            <div style={{ marginTop: 16 }}>
+              <ExplorePanel onChipClick={handleChipClick} />
             </div>
           )}
 
@@ -1496,23 +1521,11 @@ export default function Home() {
           <div style={{ textAlign: "center", padding: "80px 32px 48px" }}>
             <div style={{
               fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 300,
-              color: "#8A8A85", marginBottom: 10, letterSpacing: "0.02em",
+              color: "#8A8A85", marginBottom: 24, letterSpacing: "0.02em",
             }}>
               Nothing matched in the archive
             </div>
-            <div style={{
-              fontFamily: "var(--font-body)", fontSize: 12, color: "#444",
-              letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8,
-            }}>
-              Try free-typing anything — house, year, colour, silhouette
-            </div>
-            <div style={{
-              fontFamily: "var(--font-body)", fontSize: 11, color: "#3A3A38",
-              letterSpacing: "0.04em", marginBottom: 36,
-            }}>
-              "chanel" · "red dress" · "90s minimalism" · "Valentino gown"
-            </div>
-            <SuggestionChips onChipClick={handleChipClick} />
+            <ExplorePanel onChipClick={handleChipClick} />
           </div>
         )}
 

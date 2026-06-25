@@ -34,8 +34,9 @@ _DUAL_YEAR_RE = re.compile(
 )
 
 # Fuzzy match cutoff: how similar a typo must be to a known brand (0–100).
-# 80 = allows 1–2 character errors in short names, 3–4 in longer names.
-_FUZZY_CUTOFF = 80
+# 75 = Google-level tolerance — 1–2 char errors on short names (Doir→Dior),
+# up to 3–4 on longer names (balenciga→Balenciaga, chanell→Chanel).
+_FUZZY_CUTOFF = 75
 
 # ── Metadata filter parsing ───────────────────────────────────────────────────
 
