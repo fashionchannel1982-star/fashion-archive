@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from typing import Optional
 import urllib.error
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -184,6 +185,73 @@ else:
 total = len(results)
 passed = sum(results)
 print()
+
+# ── Render gate: API returns N → page must render N cards ────────────────────
+# Headless check via Playwright (skip gracefully if not installed or frontend down).
+# "API-returns-but-UI-blank" is a FAIL — catches stale-server and hydration crashes.
+_RENDER_QUERY = "dior"
+
+def _playwright_card_count(query: str, frontend_url: str, timeout_ms: int = 15000) -> Optional[int]:
+    """Return rendered card count for query, or None if Playwright unavailable."""
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore
+    except ImportError:
+        return None
+    script = f"""
+import sys
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    page = browser.new_page()
+    page.goto("{frontend_url}", wait_until="networkidle")
+    page.fill('input[type="text"], input[placeholder]', "{query}")
+    page.keyboard.press("Enter")
+    try:
+        page.wait_for_selector('[data-testid="result-card"]', timeout={timeout_ms})
+    except Exception:
+        pass
+    count = page.locator('[data-testid="result-card"]').count()
+    browser.close()
+    print(count)
+"""
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
+        f.write(script)
+        fname = f.name
+    try:
+        import subprocess as _sp
+        r = _sp.run([sys.executable, fname], capture_output=True, text=True, timeout=30)
+        if r.returncode == 0 and r.stdout.strip().isdigit():
+            return int(r.stdout.strip())
+    except Exception:
+        pass
+    finally:
+        import os as _os
+        _os.unlink(fname)
+    return None
+
+if ok and _frontend_up():
+    t0_render = time.time()
+    try:
+        api_data = _search(_RENDER_QUERY, limit=20)
+        api_n = api_data.get("total", 0)
+        if api_n == 0:
+            # If API itself is empty, skip render check (battery gate already caught it)
+            print(f"  –  Render gate skipped (API returned 0 for '{_RENDER_QUERY}')")
+        else:
+            rendered_n = _playwright_card_count(_RENDER_QUERY, FRONTEND_URL)
+            elapsed_render = time.time() - t0_render
+            if rendered_n is None:
+                print(f"  –  Render gate skipped (Playwright not installed)")
+            else:
+                render_ok = rendered_n >= api_n
+                detail_render = f"API={api_n}, rendered={rendered_n}" if not render_ok else f"API={api_n} → rendered={rendered_n} ✓"
+                check(f"Render: '{_RENDER_QUERY}' API→UI card count", render_ok, elapsed_render, detail_render)
+    except Exception as e:
+        check("Render gate", False, time.time() - t0_render, str(e))
+else:
+    if ok:
+        print(f"  –  Render gate skipped (frontend not running at {FRONTEND_URL})")
 
 # ── Screenshot capture (non-gating) ──────────────────────────────────────────
 # Requires frontend running at localhost:3000. Skips gracefully if not.

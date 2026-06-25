@@ -394,6 +394,7 @@ function ResultCard({
 
   return (
     <div
+      data-testid="result-card"
       style={{
         background: highlighted ? "rgba(237,232,220,0.04)" : "#141414",
         borderRadius: 8,
