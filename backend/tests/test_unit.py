@@ -895,3 +895,71 @@ class TestBrandAliasNormalisation:
     def test_unrelated_query_no_brand(self):
         m = self.parse("red structured dress")
         assert m["brand"] is None
+
+    def test_margiela_alias(self):
+        m = self.parse("margiela deconstruction")
+        assert m["brand"] == "Maison Margiela"
+
+    def test_vuitton_alias(self):
+        m = self.parse("vuitton leather goods")
+        assert m["brand"] == "Louis Vuitton"
+
+    def test_lv_alias(self):
+        m = self.parse("lv fw25 tailoring")
+        assert m["brand"] == "Louis Vuitton"
+
+    def test_bottega_alias(self):
+        m = self.parse("bottega intrecciato weave")
+        assert m["brand"] == "Bottega Veneta"
+
+    def test_bv_alias(self):
+        m = self.parse("bv minimalism")
+        assert m["brand"] == "Bottega Veneta"
+
+    def test_westwood_alias(self):
+        m = self.parse("westwood tartan corsets")
+        assert m["brand"] == "Vivienne Westwood"
+
+    def test_slp_alias(self):
+        m = self.parse("slp ss25 tailoring")
+        assert m["brand"] == "Saint Laurent"
+
+    def test_miyake_alias(self):
+        m = self.parse("miyake pleats")
+        assert m["brand"] == "Issey Miyake"
+
+    def test_rick_alias(self):
+        m = self.parse("rick layered draping")
+        assert m["brand"] == "Rick Owens"
+
+
+class TestSeasonTokenExtensions:
+    """Resort/cruise/HC season tokens and new compound aliases."""
+
+    @pytest.fixture(autouse=True)
+    def _fn(self):
+        from services.structured_match import parse_metadata_filters
+        self.parse = parse_metadata_filters
+
+    def test_hc25_parses_as_couture(self):
+        m = self.parse("Chanel HC25 embroidery")
+        assert m["season_code"] == "Couture"
+        assert m["year"] == 2025
+
+    def test_resort_maps_to_ss(self):
+        m = self.parse("resort collection florals")
+        assert m["season_code"] == "SS"
+
+    def test_cruise_maps_to_ss(self):
+        m = self.parse("cruise 2025 tailoring")
+        assert m["season_code"] == "SS"
+        assert m["year"] == 2025
+
+    def test_haute_maps_to_couture(self):
+        m = self.parse("haute couture embellishment")
+        assert m["season_code"] == "Couture"
+
+    def test_hc_word_token_maps_to_couture(self):
+        m = self.parse("Dior hc 2024 gown")
+        assert m["season_code"] == "Couture"
+        assert m["year"] == 2024

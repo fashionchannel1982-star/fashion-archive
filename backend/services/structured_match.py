@@ -10,6 +10,10 @@ from typing import Optional
 
 _YEAR_RE = re.compile(r"\b(\d{4})\b")
 
+# ── Compound-season regex extended ───────────────────────────────────────────
+# Covers: FW25, AW25, SS24, HC25 (Haute Couture), resort25, cruise25
+# Also matches bare season words used as prefixes before a year in step 1a.
+
 # Season tokens → canonical code ('FW' | 'SS' | 'Couture')
 _SEASON_MAP: dict = {
     "fall": "FW",
@@ -20,8 +24,11 @@ _SEASON_MAP: dict = {
     "spring": "SS",
     "summer": "SS",
     "ss": "SS",
+    "resort": "SS",    # Resort / Cruise lands between SS and FW; map to SS for filtering
+    "cruise": "SS",
     "couture": "Couture",
     "haute": "Couture",
+    "hc": "Couture",
 }
 
 # Structural stop-words removed from residual (but not mapped to season)
@@ -32,8 +39,8 @@ _STRUCTURAL_STOPS: frozenset = frozenset({"ready-to-wear", "rtw", "collection"})
 # Group 1 = season word/abbrev, Group 2 = 2- or 4-digit year
 _SEASON_YY_RE = re.compile(
     r"(?<!\w)"
-    r"(fw|aw|a-w|ss|s-s|fall|autumn|winter|spring|summer|couture)"
-    r"[\s'’‘]*"
+    r"(fw|aw|a-w|ss|s-s|hc|fall|autumn|winter|spring|summer|resort|cruise|couture)"
+    r"[\s’’’]*"
     r"(\d{4}|\d{2})"
     r"(?:/\d{2,4})?"   # optional /YY or /YYYY range — discard, take first year
     r"(?!\w)",
@@ -46,6 +53,8 @@ _SEASON_CODE_MAP: dict = {
     "fall": "FW", "autumn": "FW", "winter": "FW",
     "ss": "SS", "s-s": "SS",
     "spring": "SS", "summer": "SS",
+    "resort": "SS", "cruise": "SS",
+    "hc": "Couture",
     "couture": "Couture",
 }
 

@@ -73,10 +73,23 @@ KNOWN_BRANDS = [
 # After brand detection in parse_metadata_filters / extract_brand_from_query,
 # the detected token is normalised through this map before it reaches SQL.
 _BRAND_ALIASES: dict = {
-    "hermes": "Hermès",    # user types without accent → match DB 'Hermès'
-    "céline": "Celine",    # DB brand has no accent
+    # Accent variants
+    "hermes": "Hermès",        # user types without accent → match DB 'Hermès'
+    "céline": "Celine",        # DB brand has no accent
+    # Common shorthand / partial names
     "ysl": "Saint Laurent",
+    "slp": "Saint Laurent",    # Saint Laurent Paris (older branding)
     "mcqueen": "Alexander McQueen",
+    "margiela": "Maison Margiela",
+    "vuitton": "Louis Vuitton",
+    "lv": "Louis Vuitton",
+    "bottega": "Bottega Veneta",
+    "bv": "Bottega Veneta",
+    "westwood": "Vivienne Westwood",
+    "miyake": "Issey Miyake",
+    "rick": "Rick Owens",
+    "owens": "Rick Owens",
+    "jil": "Jil Sander",
 }
 
 
