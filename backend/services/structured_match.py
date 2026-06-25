@@ -4,7 +4,38 @@ Pure functions, no I/O. Called post-retrieval to reorder candidates.
 """
 
 import re
-from typing import Optional
+from typing import Optional, List
+
+
+# ── European season normalisation ─────────────────────────────────────────────
+# Applied as a pre-processing step before any other parsing.
+# Converts European-convention notation to the tokens our regex already handles.
+#
+# FA stores: "Fall 2025 Ready-to-Wear" (Vogue Runway standard, single year)
+# FA accepts at search time (all resolve to the same season):
+#   AW25/26, A/W 2025/26, Autumn/Winter 2025, a/w 25/26
+#   SS25, S/S 25, Spring/Summer 2025
+#   25/26 standalone (always FW — dual-year notation is only used for Fall/Winter)
+#   Winter 2026 (= AW 2025/26 in European convention; we try year then year-1 in search)
+#
+_EU_NORMALISE: list = [
+    # Autumn/Winter → AW  (must run before shorter patterns)
+    (re.compile(r'\bautumn[-/\s]+winter\b', re.IGNORECASE), 'AW'),
+    (re.compile(r'\bspring[-/\s]+summer\b', re.IGNORECASE), 'SS'),
+    # A/W → AW, S/S → SS
+    (re.compile(r'\ba[-/]w\b', re.IGNORECASE), 'AW'),
+    (re.compile(r'\bs[-/]s\b', re.IGNORECASE), 'SS'),
+]
+
+# Standalone dual-year: "25/26" or "2025/26" or "2025/2026" — always FW, take first year.
+# Lookbehind excludes letters so this doesn't fire inside "FW25/26" (handled by _SEASON_YY_RE).
+_DUAL_YEAR_RE = re.compile(
+    r'(?<![a-zA-Z\d])(\d{2}|\d{4})/(\d{2}|\d{4})(?!\d)'
+)
+
+# Fuzzy match cutoff: how similar a typo must be to a known brand (0–100).
+# 80 = allows 1–2 character errors in short names, 3–4 in longer names.
+_FUZZY_CUTOFF = 80
 
 # ── Metadata filter parsing ───────────────────────────────────────────────────
 
@@ -124,6 +155,18 @@ def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> d
     year_max: Optional[int] = None
     season_code: Optional[str] = None  # may be set by step 1a before brand detection
 
+    # 0-pre. European season notation → canonical tokens.
+    # Must run first so later passes see "AW" not "Autumn/Winter".
+    for pattern, replacement in _EU_NORMALISE:
+        text = pattern.sub(replacement, text)
+
+    # 0-pre-b. Standalone dual-year "25/26" or "2025/26" → "AW 25" (take first year).
+    # This notation is exclusively used for Fall/Winter in European fashion.
+    dm = _DUAL_YEAR_RE.search(text)
+    if dm:
+        first = dm.group(1)
+        text = text[:dm.start()] + f"AW {first}" + text[dm.end():]
+
     # 0a. Meta-phrases: cross-house/comparison intent (strip before embedding)
     cross_house = bool(_META_PHRASE_RE.search(text))
     if cross_house:
@@ -242,6 +285,16 @@ def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> d
                     ambiguous.append(bm.group(0))
             # if y4 is None (27–84) leave silently in residual — not a year candidate
 
+    # 4. Fuzzy brand fallback — catches typos when no exact/alias match found.
+    # Only fires when no brand was detected yet and there's a plausible short token
+    # in the residual that could be a misspelled brand name.
+    if not brand and known_brands:
+        brand = _fuzzy_brand(residual, known_brands)
+        if brand:
+            # strip the matched word from residual so it doesn't pollute the embedding
+            residual = re.sub(re.escape(brand), "", residual, flags=re.IGNORECASE)
+            residual = re.sub(r"\s+", " ", residual).strip(" .,;")
+
     return {
         "year": year,
         "year_min": year_min,
@@ -252,6 +305,48 @@ def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> d
         "ambiguous": ambiguous,
         "cross_house": cross_house,
     }
+
+
+def _fuzzy_brand(text: str, known_brands: List[str]) -> Optional[str]:
+    """
+    Return the best-matching brand name if any token in text is within
+    _FUZZY_CUTOFF% similarity of a known brand. Returns None otherwise.
+
+    Uses rapidfuzz for speed. Tries each whitespace-delimited token (and
+    adjacent 2-token windows) so "versachee tailoring" still matches "Versace".
+    """
+    try:
+        from rapidfuzz import process as fuzz, fuzz as fuzz_ratio
+    except ImportError:
+        return None
+
+    from services.twelvelabs import _BRAND_ALIASES
+
+    # Build a flat candidate list: canonical brands + alias keys → canonical brand
+    candidate_map: dict = {b.lower(): b for b in known_brands}
+    for alias, canonical in _BRAND_ALIASES.items():
+        candidate_map[alias.lower()] = canonical
+
+    candidates = list(candidate_map.keys())
+    tokens = text.lower().split()
+
+    # Try single tokens and adjacent 2-token windows
+    windows: List[str] = tokens + [
+        f"{tokens[i]} {tokens[i+1]}" for i in range(len(tokens) - 1)
+    ]
+
+    best_score = 0
+    best_canonical: Optional[str] = None
+    for window in windows:
+        if len(window) < 3:
+            continue
+        result = fuzz.extractOne(window, candidates, scorer=fuzz_ratio.WRatio,
+                                 score_cutoff=_FUZZY_CUTOFF)
+        if result and result[1] > best_score:
+            best_score = result[1]
+            best_canonical = candidate_map[result[0]]
+
+    return best_canonical
 
 
 

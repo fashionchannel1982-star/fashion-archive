@@ -995,6 +995,11 @@ export default function Home() {
   const [synthesizing, setSynthesizing] = useState(false);
   const [searchError, setSearchError] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout>();
+  const suggestRef = useRef<NodeJS.Timeout>();
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestionIdx, setSuggestionIdx] = useState(-1);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -1102,11 +1107,52 @@ export default function Home() {
     }
   }, []);
 
+  const fetchSuggestions = useCallback((val: string) => {
+    clearTimeout(suggestRef.current);
+    if (!val.trim()) { setSuggestions([]); setShowSuggestions(false); return; }
+    suggestRef.current = setTimeout(async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/suggest?q=${encodeURIComponent(val)}&limit=8`);
+        if (!r.ok) return;
+        const d = await r.json();
+        setSuggestions(d.suggestions || []);
+        setSuggestionIdx(-1);
+        setShowSuggestions((d.suggestions || []).length > 0);
+      } catch {}
+    }, 150);
+  }, []);
+
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setQuery(val);
+    fetchSuggestions(val);
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => runSearch(val), 300);
+  };
+
+  const acceptSuggestion = (s: string) => {
+    setQuery(s);
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setSuggestionIdx(-1);
+    runSearch(s);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSuggestions || suggestions.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSuggestionIdx((i) => Math.min(i + 1, suggestions.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSuggestionIdx((i) => Math.max(i - 1, -1));
+    } else if (e.key === "Enter" && suggestionIdx >= 0) {
+      e.preventDefault();
+      acceptSuggestion(suggestions[suggestionIdx]);
+    } else if (e.key === "Escape") {
+      setShowSuggestions(false);
+      setSuggestionIdx(-1);
+    }
   };
 
   const handleChipClick = (chip: string) => {
@@ -1255,35 +1301,82 @@ export default function Home() {
             </div>
           )}
 
-          {/* Search input */}
-          <div style={{ width: "100%", maxWidth: 640, position: "relative" }}>
+          {/* Search input + autocomplete */}
+          <div
+            style={{ width: "100%", maxWidth: 640, position: "relative" }}
+            onBlur={(e) => {
+              // hide dropdown when focus leaves the container entirely
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                setShowSuggestions(false);
+              }
+            }}
+          >
             <input
+              ref={inputRef}
               type="text"
               value={query}
               onChange={handleInput}
+              onKeyDown={handleKeyDown}
               placeholder="Type anything — house, era, colour, silhouette…"
               autoFocus
+              autoComplete="off"
               style={{
                 width: "100%", background: "#141414",
-                border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+                border: "1px solid rgba(255,255,255,0.08)", borderRadius: showSuggestions ? "8px 8px 0 0" : 8,
                 padding: "16px 20px 16px 48px",
                 fontFamily: "var(--font-body)", fontSize: 15, color: "#F5F5F0",
                 transition: "border-color 0.2s",
               }}
-              onFocus={(e) => (e.target.style.borderColor = "rgba(237,232,220,0.25)")}
+              onFocus={(e) => {
+                e.target.style.borderColor = "rgba(237,232,220,0.25)";
+                if (suggestions.length > 0) setShowSuggestions(true);
+              }}
               onBlur={(e) => (e.target.style.borderColor = "rgba(255,255,255,0.08)")}
             />
             <span style={{
-              position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)",
+              position: "absolute", left: 16, top: showSuggestions ? 22 : "50%",
+              transform: showSuggestions ? "none" : "translateY(-50%)",
               color: "#8A8A85", fontSize: 20, pointerEvents: "none",
             }}>⌕</span>
             {loading && (
               <span style={{
-                position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)",
+                position: "absolute", right: 16, top: 22,
                 width: 12, height: 12,
                 border: "1.5px solid rgba(237,232,220,0.3)", borderTopColor: "#EDE8DC",
                 borderRadius: "50%", animation: "spin 0.6s linear infinite", display: "block",
               }} />
+            )}
+
+            {/* Autocomplete dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div style={{
+                position: "absolute", top: "100%", left: 0, right: 0,
+                background: "#141414",
+                border: "1px solid rgba(237,232,220,0.25)", borderTop: "none",
+                borderRadius: "0 0 8px 8px",
+                zIndex: 100, overflow: "hidden",
+              }}>
+                {suggestions.map((s, i) => (
+                  <div
+                    key={s}
+                    tabIndex={-1}
+                    onMouseDown={(e) => { e.preventDefault(); acceptSuggestion(s); }}
+                    style={{
+                      padding: "10px 20px 10px 48px",
+                      fontFamily: "var(--font-body)", fontSize: 14,
+                      color: i === suggestionIdx ? "#F5F5F0" : "#8A8A85",
+                      background: i === suggestionIdx ? "#1C1C1C" : "transparent",
+                      cursor: "pointer",
+                      borderTop: i > 0 ? "1px solid rgba(255,255,255,0.04)" : "none",
+                    }}
+                    onMouseEnter={() => setSuggestionIdx(i)}
+                    onMouseLeave={() => setSuggestionIdx(-1)}
+                  >
+                    <span style={{ color: "#EDE8DC", marginRight: 6 }}>⌕</span>
+                    {s}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 

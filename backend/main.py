@@ -120,6 +120,128 @@ async def health():
 
 
 # ─────────────────────────────────────────
+# SUGGEST  (autocomplete)
+# ─────────────────────────────────────────
+
+# In-memory suggestion index built at startup (or on first call).
+# Rebuilt automatically when the module reloads.
+_suggest_index: Optional[list] = None
+
+def _build_suggest_index() -> list:
+    """
+    Build a flat list of suggestion strings from the known brands and their
+    seasons in the DB.  Called once; result is cached in _suggest_index.
+    Format: ["Chanel", "Chanel AW25/26", "Chanel SS25", ...]
+    DB is read synchronously here — this runs at startup, not per-request.
+    """
+    import asyncio as _asyncio
+    from services.twelvelabs import KNOWN_BRANDS, _BRAND_ALIASES
+    from services.database import AsyncSessionLocal
+    from sqlalchemy import text as _text
+
+    suggestions: list = []
+
+    # All canonical brand names
+    suggestions.extend(KNOWN_BRANDS)
+
+    # Fetch brand+season combinations from DB
+    async def _fetch():
+        async with AsyncSessionLocal() as session:
+            rows = (await session.execute(_text(
+                "SELECT brand, season, year, season_type FROM shows ORDER BY brand, year DESC"
+            ))).fetchall()
+        return rows
+
+    try:
+        loop = _asyncio.new_event_loop()
+        rows = loop.run_until_complete(_fetch())
+        loop.close()
+    except Exception:
+        rows = []
+
+    for r in rows:
+        # Vogue format: "Chanel Fall 2025"
+        suggestions.append(f"{r.brand} {r.season}")
+        # European compact: "Chanel AW25/26" or "Chanel SS25"
+        y = r.year
+        if r.season_type in ("AW-RTW", "Couture") or (r.season_type and "AW" in r.season_type):
+            eu = f"AW{str(y)[2:]}/{str(y+1)[2:]}"
+        elif r.season_type == "SS-RTW" or (r.season_type and "SS" in r.season_type):
+            eu = f"SS{str(y)[2:]}"
+        else:
+            eu = None
+        if eu:
+            suggestions.append(f"{r.brand} {eu}")
+
+    # Deduplicate preserving order
+    seen: set = set()
+    unique: list = []
+    for s in suggestions:
+        k = s.lower()
+        if k not in seen:
+            seen.add(k)
+            unique.append(s)
+
+    return unique
+
+
+@app.get("/api/suggest")
+async def suggest(q: str = "", limit: int = 8):
+    """
+    Autocomplete suggestions for the search input.
+    Returns up to `limit` suggestions ranked by relevance to the partial query `q`.
+
+    Strategy (Google-style):
+      1. Exact prefix matches first (case-insensitive)
+      2. Any-position substring matches next
+      3. Fuzzy matches last (typo correction via rapidfuzz)
+    """
+    global _suggest_index
+    if _suggest_index is None:
+        _suggest_index = _build_suggest_index()
+
+    if not q or not q.strip():
+        # Empty query → return all brand names (discovery mode)
+        from services.twelvelabs import KNOWN_BRANDS
+        return {"suggestions": sorted(KNOWN_BRANDS)[:limit]}
+
+    q_lower = q.strip().lower()
+
+    prefix: list = []
+    substring: list = []
+    for s in _suggest_index:
+        sl = s.lower()
+        if sl.startswith(q_lower):
+            prefix.append(s)
+        elif q_lower in sl:
+            substring.append(s)
+
+    results = prefix + substring
+
+    # Fuzzy fallback if not enough results (typo correction)
+    if len(results) < limit:
+        try:
+            from rapidfuzz import process as fuzz, fuzz as fuzz_ratio
+            fuzzy_matches = fuzz.extract(
+                q_lower,
+                [s.lower() for s in _suggest_index],
+                scorer=fuzz_ratio.WRatio,
+                limit=limit * 2,
+                score_cutoff=70,
+            )
+            existing_lower = {r.lower() for r in results}
+            for match_str, score, idx in fuzzy_matches:
+                original = _suggest_index[idx]
+                if original.lower() not in existing_lower:
+                    results.append(original)
+                    existing_lower.add(original.lower())
+        except Exception:
+            pass
+
+    return {"suggestions": results[:limit]}
+
+
+# ─────────────────────────────────────────
 # SHOWS
 # ─────────────────────────────────────────
 
