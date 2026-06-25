@@ -55,29 +55,54 @@ def _get_index_id() -> str:
 SIMILARITY_THRESHOLD = 0.03
 
 # Known brands — used to extract brand filter from free-text queries
+# Canonical brand names exactly as stored in the DB — one entry per house.
+# Sorted longest-first so "Alexander McQueen" is matched before a hypothetical
+# "McQueen" and "Bottega Veneta" before "Veneta".
+# Do NOT add duplicate spellings here (e.g. "Hermes" vs "Hermès").  Instead,
+# put aliases in _BRAND_ALIASES below so the SQL always sends the DB-canonical
+# spelling in the WHERE clause.
 KNOWN_BRANDS = [
-    "Chanel", "Dior", "Gucci", "Valentino", "Versace", "Prada", "Miu Miu",
-    "Loewe", "Hermès", "Hermes", "Fendi", "Givenchy", "Celine", "Céline",
-    "Balenciaga", "Bottega Veneta", "Burberry", "Louis Vuitton",
-    "Alexander McQueen", "Saint Laurent", "Rick Owens", "Jacquemus",
-    "Jil Sander", "Issey Miyake", "Maison Margiela", "Vivienne Westwood",
+    "Alexander McQueen", "Bottega Veneta", "Louis Vuitton", "Maison Margiela",
+    "Issey Miyake", "Vivienne Westwood", "Jil Sander", "Saint Laurent",
+    "Rick Owens", "Jacquemus", "Balenciaga", "Burberry", "Givenchy",
+    "Valentino", "Versace", "Chanel", "Hermès", "Fendi", "Loewe",
+    "Celine", "Gucci", "Prada", "Dior", "Miu Miu",
 ]
+
+# Alias → DB-canonical brand name.  Matched case-insensitively.
+# After brand detection in parse_metadata_filters / extract_brand_from_query,
+# the detected token is normalised through this map before it reaches SQL.
+_BRAND_ALIASES: dict = {
+    "hermes": "Hermès",    # user types without accent → match DB 'Hermès'
+    "céline": "Celine",    # DB brand has no accent
+    "ysl": "Saint Laurent",
+    "mcqueen": "Alexander McQueen",
+}
 
 
 def extract_brand_from_query(query: str):
     """
-    Return (brand_name_or_None, cleaned_query_without_brand).
+    Return (canonical_brand_or_None, cleaned_query_without_brand).
     Removes the matched brand token from the query so the embedding focuses
     on visual attributes only (Marengo can't encode brand names anyway).
+    Brand name is normalised through _BRAND_ALIASES so SQL always uses the
+    DB-canonical spelling (e.g. 'hermes' → 'Hermès').
     """
+    import re as _re
     q_lower = query.lower()
-    for brand in KNOWN_BRANDS:
-        if brand.lower() in q_lower:
-            cleaned = query.replace(brand, "").replace(brand.lower(), "").strip(" ,")
-            # collapse double spaces
-            import re
-            cleaned = re.sub(r"\s+", " ", cleaned).strip()
-            return brand, cleaned or query
+    # Also check aliases first (longer aliases before shorter ones)
+    all_candidates = sorted(
+        list(KNOWN_BRANDS) + list(_BRAND_ALIASES.keys()),
+        key=len,
+        reverse=True,
+    )
+    for candidate in all_candidates:
+        if candidate.lower() in q_lower:
+            # Normalise alias → canonical
+            canonical = _BRAND_ALIASES.get(candidate.lower(), candidate)
+            cleaned = _re.sub(_re.escape(candidate), "", query, flags=_re.IGNORECASE)
+            cleaned = _re.sub(r"\s+", " ", cleaned).strip(" ,")
+            return canonical, cleaned or query
     return None, query
 
 

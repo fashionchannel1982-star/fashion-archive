@@ -171,14 +171,20 @@ def parse_metadata_filters(query: str, known_brands: Optional[list] = None) -> d
                 year_min, year_max = _DECADE_RANGES[decade_key]
                 text = text[: dm.start()] + text[dm.end():]
 
-    # 2. Detect brand (longest match wins to avoid 'Dior' shadowing 'Christian Dior')
+    # 2. Detect brand (longest match wins to avoid 'Dior' shadowing 'Christian Dior').
+    #    Also checks _BRAND_ALIASES so "hermes" → "Hermès" (DB-canonical spelling).
     brand: Optional[str] = brand_lock
     if not brand:
-        brands = sorted(known_brands or [], key=lambda b: len(b), reverse=True)
+        from services.twelvelabs import _BRAND_ALIASES
+        all_candidates = sorted(
+            list(known_brands or []) + list(_BRAND_ALIASES.keys()),
+            key=len,
+            reverse=True,
+        )
         q_lower = text.lower()
-        for b in brands:
+        for b in all_candidates:
             if b.lower() in q_lower:
-                brand = b
+                brand = _BRAND_ALIASES.get(b.lower(), b)
                 text = re.sub(re.escape(b), "", text, flags=re.IGNORECASE)
                 break
     else:

@@ -47,7 +47,16 @@ if _sentry_dsn:
     )
     logger.info("Sentry error tracking enabled")
 
-app = FastAPI(title="Fashion Archive API", version="2.0.0")
+# Disable /docs and /redoc in production (set DISABLE_DOCS=1 in prod env).
+# In dev they're useful; in a shared/deployed environment they leak schema.
+_disable_docs = os.getenv("DISABLE_DOCS", "0") == "1"
+app = FastAPI(
+    title="Fashion Archive API",
+    version="2.0.0",
+    docs_url=None if _disable_docs else "/docs",
+    redoc_url=None if _disable_docs else "/redoc",
+    openapi_url=None if _disable_docs else "/openapi.json",
+)
 
 _cors_origins = [
     o.strip()
@@ -773,7 +782,7 @@ Write a concise show brief in exactly this structure (use these headings, keep e
 Be precise and editorial. Do not mention the brand name or designer. Under 200 words total."""
 
     msg = await client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=400,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -791,7 +800,7 @@ Be precise and editorial. Do not mention the brand name or designer. Under 200 w
 # ─────────────────────────────────────────
 
 class MoodBoardExportRequest(BaseModel):
-    moment_ids: list
+    moment_ids: list[str]
     title: str = "Mood Board"
 
 @app.post("/api/moodboard/export")
