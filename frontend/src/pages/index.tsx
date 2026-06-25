@@ -1061,6 +1061,7 @@ export default function Home() {
       } finally {
         clearTimeout(searchTimer);
       }
+      if (!res.ok) throw new Error(`Search failed: ${res.status}`);
       const data: SearchResponse = await res.json();
       setResults(data.results);
       // Never show "no strong match" for bare-house results — the house IS the match.
