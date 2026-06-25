@@ -1245,16 +1245,15 @@ export default function Home() {
     <>
       {/* Top bar */}
       <div style={{
-        position: "fixed", top: 0, left: 0, right: 0, height: 52,
-        borderBottom: hasSearched ? "1px solid rgba(255,255,255,0.05)" : "none",
-        background: "rgba(10,10,10,0.9)", backdropFilter: "blur(12px)",
+        position: "fixed", top: 0, left: 0, right: 0, height: 56,
+        borderBottom: "1px solid rgba(255,255,255,0.05)",
+        background: "rgba(10,10,10,0.92)", backdropFilter: "blur(12px)",
         zIndex: 50, display: "flex", alignItems: "center",
         padding: "0 32px", justifyContent: "space-between",
       }}>
         <span style={{
-          fontFamily: "var(--font-display)", fontSize: 16,
-          letterSpacing: "0.12em", color: "#EDE8DC",
-          opacity: hasSearched ? 1 : 0, transition: "opacity 0.3s",
+          fontFamily: "var(--font-display)", fontSize: 15,
+          letterSpacing: "0.16em", color: "#EDE8DC",
         }}>
           FASHION ARCHIVE
         </span>
@@ -1266,10 +1265,10 @@ export default function Home() {
             style={{
               background: moodBoard.size > 0 ? "rgba(74,222,128,0.08)" : "none",
               border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4,
-              padding: "4px 12px", cursor: "pointer",
-              fontFamily: "var(--font-body)", fontSize: 11,
+              padding: "6px 14px", cursor: "pointer",
+              fontFamily: "var(--font-body)", fontSize: 12,
               color: moodBoard.size > 0 ? "#4ADE80" : "#8A8A85",
-              letterSpacing: "0.1em", transition: "all 0.15s",
+              letterSpacing: "0.08em", transition: "all 0.15s",
             }}
           >
             ⊞ Looks {moodBoard.size > 0 ? `(${moodBoard.size})` : ""}
@@ -1280,10 +1279,10 @@ export default function Home() {
             onClick={() => { setShowBookmarks((v) => !v); setShowMoodBoard(false); }}
             style={{
               background: "none", border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 4, padding: "4px 12px", cursor: "pointer",
-              fontFamily: "var(--font-body)", fontSize: 11,
+              borderRadius: 4, padding: "6px 14px", cursor: "pointer",
+              fontFamily: "var(--font-body)", fontSize: 12,
               color: bookmarkList.length > 0 ? "#EDE8DC" : "#8A8A85",
-              letterSpacing: "0.1em", transition: "all 0.15s",
+              letterSpacing: "0.08em", transition: "all 0.15s",
             }}
           >
             ✦ Saved {bookmarkList.length > 0 ? `(${bookmarkList.length})` : ""}
@@ -1294,7 +1293,7 @@ export default function Home() {
       {/* Main content */}
       <main style={{
         minHeight: "100vh",
-        paddingTop: hasSearched ? 80 : 0,
+        paddingTop: hasSearched ? 80 : 56,
         transition: "padding-top 0.4s ease",
       }}>
         {/* Hero / search section */}
@@ -1302,27 +1301,17 @@ export default function Home() {
           display: "flex", flexDirection: "column",
           alignItems: "center",
           justifyContent: hasSearched ? "flex-start" : "center",
-          minHeight: hasSearched ? "auto" : "100vh",
-          padding: hasSearched ? "0 32px 24px" : "0 32px",
+          minHeight: hasSearched ? "auto" : "calc(100vh - 56px)",
+          padding: hasSearched ? "0 32px 24px" : "0 32px 56px",
           transition: "all 0.4s ease",
         }}>
           {/* Empty state — wordmark + hero + chips */}
-          {!hasSearched && (
+          {!hasSearched && heroResult && (
             <div style={{ width: "100%", maxWidth: 960, textAlign: "center", marginBottom: 36 }}>
-              <h1 style={{
-                fontFamily: "var(--font-display)", fontSize: 42, fontWeight: 300,
-                letterSpacing: "0.2em", color: "#F5F5F0", marginBottom: 32,
-              }}>
-                FASHION ARCHIVE
-              </h1>
-
-              {/* Hero moment */}
-              {heroResult && (
-                <HeroMoment
-                  result={heroResult}
-                  onPlay={(r) => setPlayingMoment({ id: r.moment_id, brand: r.brand, season: r.season })}
-                />
-              )}
+              <HeroMoment
+                result={heroResult}
+                onPlay={(r) => setPlayingMoment({ id: r.moment_id, brand: r.brand, season: r.season })}
+              />
             </div>
           )}
 
