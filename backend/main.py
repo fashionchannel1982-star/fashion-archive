@@ -747,9 +747,12 @@ async def search(request: Request, req: SearchRequest, bg: BackgroundTasks):
         metadata={"result_count": len(results), "processing_time_ms": elapsed},
     )
 
-    # Synthesize when ≥2 results; distinct-brand guard lives inside synthesize_results
+    # Synthesize when ≥2 results and query is conceptual (>1 word).
+    # Single-token lookups ("Chanel", "Dior") are brand filters, not concept queries —
+    # skip synthesis to avoid trivial same-house sentences.
+    # Distinct-brand guard lives inside synthesize_results.
     synthesis_text = None
-    if len(results) >= 2:
+    if len(results) >= 2 and len(req.query.split()) > 1:
         from services.claude import synthesize_results
         synthesis_text = await synthesize_results(req.query, results[:5])
 
@@ -801,10 +804,12 @@ async def synthesize(req: SynthesizeRequest):
         })
 
     text = await synthesize_results(req.query, moments)
+    if text is None:
+        return {"synthesis": None, "grounded": False, "cited_moment_ids": []}
     cited_ids = [m["moment_id"] for m in moments]
     return {
-        "synthesis": text or "",
-        "grounded": text is not None,
+        "synthesis": text,
+        "grounded": True,
         "cited_moment_ids": cited_ids,
     }
 
