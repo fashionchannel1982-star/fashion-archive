@@ -67,6 +67,7 @@ interface SearchResult {
   confidence: number;
   score_raw: number;
   match_type?: string | null;
+  is_bare_house?: boolean;
   creative_director?: string | null;
   show_date?: string | null;
   source?: string | null;
@@ -1061,7 +1062,9 @@ export default function Home() {
       }
       const data: SearchResponse = await res.json();
       setResults(data.results);
-      setWeakMatch(data.results.length > 0 && data.results.every((r) => r.confidence < 75));
+      // Never show "no strong match" for bare-house results — the house IS the match.
+      const isBareHouse = data.results.some((r) => r.is_bare_house);
+      setWeakMatch(!isBareHouse && data.results.length > 0 && data.results.every((r) => r.confidence < 75));
       setProcessingTime(data.processing_time_ms);
       setHasSearched(true);
       log("search", { query: q, results: data.total, ms: data.processing_time_ms });

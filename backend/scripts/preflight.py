@@ -97,12 +97,16 @@ if "refused" in detail.lower() or "timed out" in detail.lower() or "timeout" in 
 else:
     check("Backend health (http://localhost:8000)", ok, t, detail)
 
-# 5. Battery gate: all real-user queries return ≥1 result + funnel monotonic
+# 5. Battery gate
+#    a. General: all real-user queries return ≥1 result + funnel monotonic
+#    b. Bare-house: "chanel", "dior", "gucci" each return ≥6 results at strong confidence
+#       (min conf ≥75) and is_bare_house=True is set — no weak-match banner
 _BATTERY = [
     "chanel", "dior", "gucci",
     "red dress", "black dress", "1993", "90s minimalism",
     "black sheer across houses", "Valentino red gown", "structured tailoring",
 ]
+_BARE_HOUSES = ["chanel", "dior", "gucci"]
 _FUNNEL = ["chanel", "chanel 1993", "chanel 1993 red"]
 
 def _search(query, limit=20):
@@ -120,27 +124,46 @@ def _search(query, limit=20):
 if ok:
     t0_bat = time.time()
     try:
+        # a. General battery: non-empty
         empty_queries = []
         for q in _BATTERY:
             data = _search(q, limit=20)
             if data.get("total", 0) == 0:
                 empty_queries.append(q)
 
+        # b. Bare-house quality: ≥6 strong results, is_bare_house flag set
+        bare_fails = []
+        for q in _BARE_HOUSES:
+            data = _search(q, limit=20)
+            results = data.get("results", [])
+            n = len(results)
+            min_conf = min((r.get("confidence", 0) for r in results), default=0)
+            has_flag = any(r.get("is_bare_house") for r in results)
+            if n < 6:
+                bare_fails.append(f"{q}:count={n}<6")
+            elif min_conf < 75:
+                bare_fails.append(f"{q}:min_conf={min_conf}<75")
+            elif not has_flag:
+                bare_fails.append(f"{q}:no is_bare_house flag")
+
+        # c. Funnel: chanel ≥ chanel1993 ≥ chanel1993red (at limit=50)
         funnel_counts = []
         for q in _FUNNEL:
             data = _search(q, limit=50)
             funnel_counts.append(data.get("total", 0))
-
         funnel_ok = all(funnel_counts[i] >= funnel_counts[i+1] for i in range(len(funnel_counts)-1))
-        battery_ok = len(empty_queries) == 0 and funnel_ok
+
+        battery_ok = len(empty_queries) == 0 and len(bare_fails) == 0 and funnel_ok
 
         elapsed_bat = time.time() - t0_bat
         detail_bat = ""
         if empty_queries:
-            detail_bat = f"EMPTY: {', '.join(empty_queries)}"
+            detail_bat += f"EMPTY: {', '.join(empty_queries)}  "
+        if bare_fails:
+            detail_bat += f"BARE-HOUSE: {', '.join(bare_fails)}  "
         if not funnel_ok:
-            detail_bat += f"  FUNNEL broken: {funnel_counts}"
-        check("Battery: all ≥1 result + funnel narrows", battery_ok, elapsed_bat, detail_bat)
+            detail_bat += f"FUNNEL broken: {funnel_counts}"
+        check("Battery: non-empty + bare-house ≥6 strong + funnel", battery_ok, elapsed_bat, detail_bat.strip())
     except Exception as e:
         check("Battery gate", False, time.time() - t0_bat, str(e))
 else:

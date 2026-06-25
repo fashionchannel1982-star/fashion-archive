@@ -409,16 +409,32 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
     )
     cross_house = meta.get("cross_house", False)
 
+    # Bare house: recognised brand with no year/season/concept qualifier.
+    # Hard-filter path — never relaxes, never shows weak-match banner.
+    is_bare_brand = bool(
+        meta["brand"]
+        and not meta["residual"].strip()
+        and not meta["year"]
+        and not meta.get("year_min")
+        and not meta.get("year_max")
+        and not meta["season_code"]
+    )
+
     # Widen the candidate pool when structured attributes are present so re-ranking
     # has material to promote; otherwise use the requested limit directly.
     _MAX_CANDIDATE = 150
     candidate_limit = min(req.limit * 3, _MAX_CANDIDATE) if has_attrs else req.limit
 
     # Route:
-    #   structural tokens (year/brand/season) → metadata hybrid path
+    #   bare house  → hard metadata filter; no relaxation; no soft fallback
+    #   other structural tokens (year/brand/season) → metadata hybrid + relaxation
     #   cross-house phrase ("across houses", "vs", etc.) → semantic on stripped concept
     #   else → normal semantic on full query
-    if has_structural:
+    if is_bare_brand:
+        tl_results = await _metadata_hybrid_search(meta, limit=candidate_limit)
+        # Never relax for a bare house — if the brand filter returns nothing,
+        # that brand has no moments in the archive (return empty, not a fallback).
+    elif has_structural:
         tl_results = await _metadata_hybrid_search(meta, limit=candidate_limit)
         # Progressive relaxation: if concept+filter combo is too tight, retry without
         # the concept (pure metadata), then without season, keeping brand/year as last resort.
@@ -543,6 +559,7 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
                     "confidence": confidence,
                     "score_raw": round(score, 4),
                     "match_type": "hybrid" if is_hybrid_filtered else item.get("_match_type", "semantic"),
+                    "is_bare_house": is_bare_brand,
                     "_boost": round(boost, 3),      # QA field
                     "_rank_score": score + boost,
                     "creative_director": show.creative_director,
@@ -558,7 +575,8 @@ async def search(req: SearchRequest, bg: BackgroundTasks):
 
     # Fallback: if filtered concept query yielded nothing above floor (e.g. "90s minimalism"),
     # surface the soft (sub-floor) filtered results sorted by confidence.
-    if not results and soft_results:
+    # Never apply this fallback for bare-house queries — a house result is always strong.
+    if not results and soft_results and not is_bare_brand:
         results = sorted(soft_results, key=lambda r: r["confidence"], reverse=True)
 
     # Re-rank and truncate when structured attributes are present
