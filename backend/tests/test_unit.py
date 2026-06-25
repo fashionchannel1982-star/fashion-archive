@@ -854,3 +854,44 @@ class TestMetaPhraseDetection:
         assert m["cross_house"] is True
         # brand may be Chanel (first match) — the point is cross_house fires
         assert m["brand"] is not None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# services/twelvelabs.py + structured_match.py — brand alias normalisation
+# "_BRAND_ALIASES" maps unaccented/shorthand spellings to DB-canonical names
+# so SQL WHERE clauses never silently return 0 results.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.unit
+class TestBrandAliasNormalisation:
+    @pytest.fixture(autouse=True)
+    def _fns(self):
+        from services.structured_match import parse_metadata_filters
+        from services.twelvelabs import KNOWN_BRANDS
+        self.parse = lambda q: parse_metadata_filters(q, known_brands=KNOWN_BRANDS)
+
+    def test_hermes_no_accent_resolves_to_canonical(self):
+        """'hermes' (no accent) must resolve to 'Hermès' for the SQL WHERE."""
+        m = self.parse("hermes leather")
+        assert m["brand"] == "Hermès"
+
+    def test_hermès_with_accent_resolves_to_canonical(self):
+        m = self.parse("hermès leather")
+        assert m["brand"] == "Hermès"
+
+    def test_celine_no_accent_resolves_to_celine_db(self):
+        """DB stores 'Celine' (no accent); ensure no alias breaks it."""
+        m = self.parse("celine minimalism")
+        assert m["brand"] == "Celine"
+
+    def test_ysl_alias_resolves_to_saint_laurent(self):
+        m = self.parse("ysl tailoring")
+        assert m["brand"] == "Saint Laurent"
+
+    def test_mcqueen_alias(self):
+        m = self.parse("mcqueen dark romanticism")
+        assert m["brand"] == "Alexander McQueen"
+
+    def test_unrelated_query_no_brand(self):
+        m = self.parse("red structured dress")
+        assert m["brand"] is None

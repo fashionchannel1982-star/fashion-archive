@@ -136,10 +136,10 @@ if ok:
         bare_fails = []
         for q in _BARE_HOUSES:
             data = _search(q, limit=20)
-            results = data.get("results", [])
-            n = len(results)
-            min_conf = min((r.get("confidence", 0) for r in results), default=0)
-            has_flag = any(r.get("is_bare_house") for r in results)
+            bare_items = data.get("results", [])
+            n = len(bare_items)
+            min_conf = min((r.get("confidence", 0) for r in bare_items), default=0)
+            has_flag = any(r.get("is_bare_house") for r in bare_items)
             if n < 6:
                 bare_fails.append(f"{q}:count={n}<6")
             elif min_conf < 75:
@@ -182,14 +182,20 @@ if ok:
 else:
     print(f"  {'–':1}  {'Eval smoke (skipped — server not running)':45} {'skip':>8}")
 
-total = len(results)
-passed = sum(results)
-print()
-
-# ── Render gate: API returns N → page must render N cards ────────────────────
+# ── Render gate (gating): API returns N → page must render N cards ───────────
 # Headless check via Playwright (skip gracefully if not installed or frontend down).
 # "API-returns-but-UI-blank" is a FAIL — catches stale-server and hydration crashes.
+FRONTEND_URL = "http://localhost:3000"
 _RENDER_QUERY = "dior"
+
+
+def _frontend_up(timeout: int = 3) -> bool:
+    try:
+        urllib.request.urlopen(FRONTEND_URL, timeout=timeout)
+        return True
+    except Exception:
+        return False
+
 
 def _playwright_card_count(query: str, frontend_url: str, timeout_ms: int = 15000) -> Optional[int]:
     """Return rendered card count for query, or None if Playwright unavailable."""
@@ -230,13 +236,13 @@ with sync_playwright() as p:
         _os.unlink(fname)
     return None
 
+
 if ok and _frontend_up():
     t0_render = time.time()
     try:
         api_data = _search(_RENDER_QUERY, limit=20)
         api_n = api_data.get("total", 0)
         if api_n == 0:
-            # If API itself is empty, skip render check (battery gate already caught it)
             print(f"  –  Render gate skipped (API returned 0 for '{_RENDER_QUERY}')")
         else:
             rendered_n = _playwright_card_count(_RENDER_QUERY, FRONTEND_URL)
@@ -253,19 +259,15 @@ else:
     if ok:
         print(f"  –  Render gate skipped (frontend not running at {FRONTEND_URL})")
 
+total = len(results)
+passed = sum(results)
+print()
+
 # ── Screenshot capture (non-gating) ──────────────────────────────────────────
 # Requires frontend running at localhost:3000. Skips gracefully if not.
 CAPTURE_SCRIPT = os.path.join(REPO, "frontend", "scripts", "capture_shots.js")
 NODE = "node"
-FRONTEND_URL = "http://localhost:3000"
 SHOTS_ROOT = os.path.join(BACKEND, "preflight_shots")
-
-def _frontend_up(timeout: int = 3) -> bool:
-    try:
-        urllib.request.urlopen(FRONTEND_URL, timeout=timeout)
-        return True
-    except Exception:
-        return False
 
 if not os.path.exists(CAPTURE_SCRIPT):
     print(f"  –  Screenshots skipped (capture_shots.js not found)")
