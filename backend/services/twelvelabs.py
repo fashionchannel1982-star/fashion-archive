@@ -73,23 +73,167 @@ KNOWN_BRANDS = [
 # After brand detection in parse_metadata_filters / extract_brand_from_query,
 # the detected token is normalised through this map before it reaches SQL.
 _BRAND_ALIASES: dict = {
-    # Accent variants
-    "hermes": "Hermès",        # user types without accent → match DB 'Hermès'
-    "céline": "Celine",        # DB brand has no accent
-    # Common shorthand / partial names
-    "ysl": "Saint Laurent",
-    "slp": "Saint Laurent",    # Saint Laurent Paris (older branding)
+    # ── Alexander McQueen ────────────────────────────────────────────────────
     "mcqueen": "Alexander McQueen",
-    "margiela": "Maison Margiela",
-    "vuitton": "Louis Vuitton",
-    "lv": "Louis Vuitton",
+    "alexander mcqueen": "Alexander McQueen",   # redundant but explicit
+    "sarah burton": "Alexander McQueen",         # CD 2010–2023
+    "burton": "Alexander McQueen",
+
+    # ── Balenciaga ───────────────────────────────────────────────────────────
+    "demna": "Balenciaga",                       # Demna Gvasalia, CD 2015–present
+    "gvasalia": "Balenciaga",
+    "demna gvasalia": "Balenciaga",
+    "cristobal": "Balenciaga",                   # founder
+
+    # ── Bottega Veneta ───────────────────────────────────────────────────────
     "bottega": "Bottega Veneta",
     "bv": "Bottega Veneta",
-    "westwood": "Vivienne Westwood",
+    "veneta": "Bottega Veneta",
+    "daniel lee": "Bottega Veneta",              # CD 2018–2021 (defining era)
+    "matthieu blazy": "Bottega Veneta",          # CD 2022–present
+
+    # ── Burberry ─────────────────────────────────────────────────────────────
+    "burberrys": "Burberry",                     # historical name
+    "christopher bailey": "Burberry",            # CD 2001–2018
+    "riccardo tisci": "Burberry",                # CD 2018–2022
+
+    # ── Celine ───────────────────────────────────────────────────────────────
+    "céline": "Celine",                          # accent variant (pre-2018 name)
+    "phoebe philo": "Celine",                    # CD 2008–2018, most iconic era
+    "phoebe": "Celine",
+    "philo": "Celine",
+    "hedi celine": "Celine",                     # Hedi Slimane era at Celine
+
+    # ── Chanel ───────────────────────────────────────────────────────────────
+    "coco chanel": "Chanel",                     # founder
+    "coco": "Chanel",
+    "lagerfeld": "Chanel",                       # Karl Lagerfeld, CD 1983–2019
+    "karl lagerfeld": "Chanel",
+    "karl": "Chanel",
+    "virginie viard": "Chanel",                  # CD 2019–2024
+
+    # ── Dior ─────────────────────────────────────────────────────────────────
+    "christian dior": "Dior",
+    "cd": "Dior",                                # monogram
+    "maria grazia": "Dior",                      # Maria Grazia Chiuri, CD 2016–present
+    "chiuri": "Dior",
+    "raf dior": "Dior",                          # Raf Simons era 2012–2015
+    "galliano dior": "Dior",                     # John Galliano era 1996–2011
+
+    # ── Fendi ────────────────────────────────────────────────────────────────
+    "fendi roma": "Fendi",
+    "ff": "Fendi",                               # the double-F monogram / logo
+    "kim jones fendi": "Fendi",                  # Kim Jones, CD menswear/women's 2020–present
+
+    # ── Givenchy ─────────────────────────────────────────────────────────────
+    "hubert de givenchy": "Givenchy",            # founder
+    "riccardo tisci givenchy": "Givenchy",       # CD 2005–2017
+    "matthew williams": "Givenchy",              # CD 2020–present
+
+    # ── Gucci ────────────────────────────────────────────────────────────────
+    "house of gucci": "Gucci",
+    "guccio gucci": "Gucci",                     # founder
+    "tom ford gucci": "Gucci",                   # Tom Ford era 1994–2004
+    "frida giannini": "Gucci",                   # CD 2006–2015
+    "alessandro michele": "Gucci",               # CD 2015–2022, maximalist era
+    "michele": "Gucci",
+    "sabato de sarno": "Gucci",                  # CD 2023–present
+
+    # ── Hermès ───────────────────────────────────────────────────────────────
+    "hermes": "Hermès",                          # no accent
+    "hermès paris": "Hermès",
+    "nadège vanhee": "Hermès",                   # women's CD 2014–present
+    "nadege vanhee": "Hermès",
+
+    # ── Issey Miyake ─────────────────────────────────────────────────────────
     "miyake": "Issey Miyake",
+    "issey": "Issey Miyake",
+    "im issey miyake": "Issey Miyake",
+    "pleats please": "Issey Miyake",             # iconic product line — treated as brand search
+
+    # ── Jacquemus ────────────────────────────────────────────────────────────
+    "simon porte jacquemus": "Jacquemus",
+    "simon jacquemus": "Jacquemus",
+
+    # ── Jil Sander ───────────────────────────────────────────────────────────
+    "jil": "Jil Sander",
+    "sander": "Jil Sander",
+    "lucie and luke meier": "Jil Sander",        # CDs 2017–present
+    "lucie meier": "Jil Sander",
+    "luke meier": "Jil Sander",
+
+    # ── Loewe ────────────────────────────────────────────────────────────────
+    "jonathan anderson": "Loewe",                # CD 2013–2024
+    "jw anderson loewe": "Loewe",
+    "anderson loewe": "Loewe",
+
+    # ── Louis Vuitton ────────────────────────────────────────────────────────
+    "lv": "Louis Vuitton",
+    "vuitton": "Louis Vuitton",
+    "louis v": "Louis Vuitton",
+    "nicolas ghesquière": "Louis Vuitton",       # CD 2013–present
+    "ghesquiere": "Louis Vuitton",               # no accent variant
+    "nicolas ghesquiere": "Louis Vuitton",
+    "virgil abloh": "Louis Vuitton",             # CD menswear 2018–2021
+    "abloh": "Louis Vuitton",
+    "marc jacobs lv": "Louis Vuitton",           # CD 1997–2013
+
+    # ── Maison Margiela ──────────────────────────────────────────────────────
+    "margiela": "Maison Margiela",
+    "maison martin margiela": "Maison Margiela", # historical name pre-2014
+    "martin margiela": "Maison Margiela",        # founder
+    "mm6": "Maison Margiela",                    # diffusion line, often used interchangeably
+    "mm": "Maison Margiela",                     # common shorthand
+    "john galliano margiela": "Maison Margiela", # Galliano as CD 2014–present
+    "galliano margiela": "Maison Margiela",
+
+    # ── Miu Miu ──────────────────────────────────────────────────────────────
+    "miu": "Miu Miu",                            # shortened name
+    "miuccia": "Miu Miu",                        # Miuccia Prada's personal line
+    "mrs prada": "Miu Miu",
+
+    # ── Prada ────────────────────────────────────────────────────────────────
+    "miuccia prada": "Prada",
+    "raf prada": "Prada",                        # Raf Simons + Miuccia co-creative era
+    "prada group": "Prada",
+
+    # ── Rick Owens ───────────────────────────────────────────────────────────
     "rick": "Rick Owens",
     "owens": "Rick Owens",
-    "jil": "Jil Sander",
+    "rickowens": "Rick Owens",
+    "ro": "Rick Owens",
+    "drkshdw": "Rick Owens",                     # diffusion line
+
+    # ── Saint Laurent ────────────────────────────────────────────────────────
+    "ysl": "Saint Laurent",
+    "slp": "Saint Laurent",                      # Saint Laurent Paris (Slimane-era branding)
+    "saint laurent paris": "Saint Laurent",
+    "yves saint laurent": "Saint Laurent",       # historical name pre-2012
+    "yves": "Saint Laurent",
+    "anthony vaccarello": "Saint Laurent",       # CD 2016–present
+    "vaccarello": "Saint Laurent",
+    "hedi slimane": "Saint Laurent",             # CD 2012–2016 at SLP; also Celine 2018–2023
+    # note: "hedi" alone is ambiguous (Saint Laurent and Celine) — not added
+
+    # ── Valentino ────────────────────────────────────────────────────────────
+    "valentino garavani": "Valentino",           # founder's full name
+    "garavani": "Valentino",
+    "pierpaolo piccioli": "Valentino",           # CD 2016–2024
+    "piccioli": "Valentino",
+
+    # ── Versace ──────────────────────────────────────────────────────────────
+    "gianni versace": "Versace",                 # founder (1978–1997)
+    "gianni": "Versace",
+    "donatella versace": "Versace",              # CD 1997–present
+    "donatella": "Versace",
+    "versaci": "Versace",                        # common misspelling
+
+    # ── Vivienne Westwood ────────────────────────────────────────────────────
+    "westwood": "Vivienne Westwood",
+    "vw": "Vivienne Westwood",
+    "vivienne": "Vivienne Westwood",
+    "andreas kronthaler": "Vivienne Westwood",   # CD / husband, leads since 2016
+    "kronthaler": "Vivienne Westwood",
 }
 
 

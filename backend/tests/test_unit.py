@@ -896,6 +896,67 @@ class TestBrandAliasNormalisation:
         m = self.parse("red structured dress")
         assert m["brand"] is None
 
+    # Designer-name aliases
+    def test_phoebe_philo_resolves_to_celine(self):
+        m = self.parse("phoebe philo minimalism")
+        assert m["brand"] == "Celine"
+
+    def test_phoebe_alone_resolves_to_celine(self):
+        m = self.parse("phoebe era tailoring")
+        assert m["brand"] == "Celine"
+
+    def test_lagerfeld_resolves_to_chanel(self):
+        m = self.parse("lagerfeld tweed ss93")
+        assert m["brand"] == "Chanel"
+
+    def test_coco_chanel_resolves_to_chanel(self):
+        m = self.parse("coco chanel pearls")
+        assert m["brand"] == "Chanel"
+
+    def test_demna_resolves_to_balenciaga(self):
+        m = self.parse("demna gvasalia streetwear")
+        assert m["brand"] == "Balenciaga"
+
+    def test_alessandro_michele_resolves_to_gucci(self):
+        m = self.parse("alessandro michele maximalist prints")
+        assert m["brand"] == "Gucci"
+
+    def test_virgil_abloh_resolves_to_lv(self):
+        m = self.parse("virgil abloh streetwear fw21")
+        assert m["brand"] == "Louis Vuitton"
+
+    def test_piccioli_resolves_to_valentino(self):
+        m = self.parse("piccioli couture red")
+        assert m["brand"] == "Valentino"
+
+    def test_donatella_resolves_to_versace(self):
+        m = self.parse("donatella versace gold")
+        assert m["brand"] == "Versace"
+
+    def test_martin_margiela_resolves_to_maison_margiela(self):
+        m = self.parse("martin margiela deconstruction")
+        assert m["brand"] == "Maison Margiela"
+
+    def test_mm6_resolves_to_maison_margiela(self):
+        m = self.parse("mm6 avant garde")
+        assert m["brand"] == "Maison Margiela"
+
+    def test_daniel_lee_resolves_to_bottega(self):
+        m = self.parse("daniel lee bottega intrecciato")
+        assert m["brand"] == "Bottega Veneta"
+
+    def test_miu_resolves_to_miu_miu(self):
+        m = self.parse("miu ss25")
+        assert m["brand"] == "Miu Miu"
+
+    def test_christian_dior_resolves_to_dior(self):
+        m = self.parse("christian dior aw24 couture")
+        assert m["brand"] == "Dior"
+
+    def test_yves_saint_laurent_resolves_to_saint_laurent(self):
+        m = self.parse("yves saint laurent 1993 le smoking")
+        assert m["brand"] == "Saint Laurent"
+
     def test_margiela_alias(self):
         m = self.parse("margiela deconstruction")
         assert m["brand"] == "Maison Margiela"
