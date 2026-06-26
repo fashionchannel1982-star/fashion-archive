@@ -15,7 +15,7 @@ client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = "claude-sonnet-4-6"
 
 
-async def enrich_look(raw_description: str, show_context: dict) -> dict:
+async def enrich_look(raw_description: str, show_context: dict, model: Optional[str] = None) -> dict:
     """
     Take a raw Pegasus description and enrich it with structured fashion intelligence.
     Returns structured data: clean description, garments, colours, silhouette, key pieces.
@@ -53,7 +53,7 @@ Return only the JSON object. No preamble, no explanation."""
 
     try:
         response = client.messages.create(
-            model=MODEL,
+            model=model or MODEL,
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -64,7 +64,10 @@ Return only the JSON object. No preamble, no explanation."""
             text = text.split("```")[1]
             if text.startswith("json"):
                 text = text[4:]
-        return json.loads(text.strip())
+        result = json.loads(text.strip())
+        # _fallback=False signals valid JSON parse (empty arrays = genuine uncertainty)
+        result["_fallback"] = False
+        return result
     except Exception as e:
         logger.warning(f"Claude enrichment failed: {e}")
         return {
@@ -74,6 +77,7 @@ Return only the JSON object. No preamble, no explanation."""
             "silhouette": "",
             "key_pieces": [],
             "search_tags": [],
+            "_fallback": True,  # signals parse failure / API error — retryable
         }
 
 

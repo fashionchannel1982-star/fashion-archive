@@ -754,7 +754,20 @@ async def search(request: Request, req: SearchRequest, bg: BackgroundTasks):
     synthesis_text = None
     if len(results) >= 2 and len(req.query.split()) > 1:
         from services.claude import synthesize_results
-        synthesis_text = await synthesize_results(req.query, results[:5])
+        from services.database import SynthesisCache
+        cache_key = req.query.strip().lower()
+        async with AsyncSessionLocal() as _cs:
+            cached = (await _cs.execute(
+                select(SynthesisCache).where(SynthesisCache.query_key == cache_key)
+            )).scalar_one_or_none()
+        if cached:
+            synthesis_text = cached.synthesis
+        else:
+            synthesis_text = await synthesize_results(req.query, results[:5])
+            if synthesis_text:
+                async with AsyncSessionLocal() as _cs:
+                    _cs.add(SynthesisCache(query_key=cache_key, synthesis=synthesis_text))
+                    await _cs.commit()
 
     return {
         "query": req.query,
@@ -803,9 +816,22 @@ async def synthesize(req: SynthesizeRequest):
             },
         })
 
+    from services.database import SynthesisCache
+    cache_key = req.query.strip().lower()
+    async with AsyncSessionLocal() as _cs:
+        cached = (await _cs.execute(
+            select(SynthesisCache).where(SynthesisCache.query_key == cache_key)
+        )).scalar_one_or_none()
+    if cached:
+        cited_ids = [m["moment_id"] for m in moments]
+        return {"synthesis": cached.synthesis, "grounded": True, "cited_moment_ids": cited_ids}
+
     text = await synthesize_results(req.query, moments)
     if text is None:
         return {"synthesis": None, "grounded": False, "cited_moment_ids": []}
+    async with AsyncSessionLocal() as _cs:
+        _cs.add(SynthesisCache(query_key=cache_key, synthesis=text))
+        await _cs.commit()
     cited_ids = [m["moment_id"] for m in moments]
     return {
         "synthesis": text,

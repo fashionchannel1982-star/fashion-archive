@@ -179,10 +179,43 @@ Response:
 }
 ```
 
-**Confidence scoring logic:**
-- Raw cosine similarity from pgvector (0.0–1.0) → multiply by 100 → round to integer
-- Bucket display: 90–100 = "Exact match", 75–89 = "Strong match", 60–74 = "Relevant", below 60 = suppress from results
-- Never show raw float to user — always display as integer 0–100
+**Confidence scoring logic (as implemented):**
+
+> The old "raw cosine × 100, suppress below 30" rule is superseded by the two-stage pipeline below.
+
+**Stage 1 — raw pre-filter** (`services/twelvelabs.py`, `SIMILARITY_THRESHOLD = 0.03`):
+Any candidate with raw cosine < 0.03 is dropped before calibration. This threshold is intentionally very low — it exists only to cull absolute noise. Do not raise it to change the display cutoff; adjust `SEARCH_CONFIDENCE_FLOOR` instead.
+
+**Stage 2 — logistic calibration** (`services/confidence.py`):
+Raw cosine is mapped to an integer 0–100 via a logistic curve:
+
+```
+calibrate(cos) = 100 / (1 + exp(-k × (cos − x0)))
+```
+
+Constants (quoted from `services/confidence.py`):
+- `_DEFAULT_K  = 40.0`  — steepness; env override: `CONF_K`
+- `_DEFAULT_X0 = 0.065` — inflection point (raw cosine at which output = 50); env override: `CONF_X0`
+
+Selected calibration values:
+| Raw cosine | Calibrated confidence |
+|---|---|
+| 0.030 | 20 (pre-filtered by SIMILARITY_THRESHOLD) |
+| 0.065 | 50 (inflection — x0) |
+| 0.075 | 60 (floor — see below) |
+| 0.095 | 77 ("Strong match") |
+| 0.120 | 90 ("Exact match") |
+
+**Stage 3 — floor suppression** (`SEARCH_CONFIDENCE_FLOOR`, default `60`, env-configurable):
+Results with calibrated confidence below the floor are dropped server-side before the response is assembled. At the default floor of 60, the effective raw-cosine cutoff is ≈ 0.075.
+
+**Display buckets** (unchanged):
+- 90–100 = "Exact match" (raw cosine ≈ ≥ 0.12)
+- 75–89  = "Strong match" (raw cosine ≈ 0.09–0.12)
+- 60–74  = "Relevant" (raw cosine ≈ 0.075–0.09)
+- below 60 = suppressed — never shown to the user
+
+Never show the raw float to the user — always display as an integer 0–100.
 
 ---
 

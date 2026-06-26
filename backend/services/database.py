@@ -145,6 +145,15 @@ class Provenance(Base):
     show: Mapped["Show"] = relationship("Show", back_populates="provenance")
 
 
+class SynthesisCache(Base):
+    """Pre-generated synthesis lines keyed by normalised query text."""
+    __tablename__ = "synthesis_cache"
+
+    query_key: Mapped[str] = mapped_column(String, primary_key=True)
+    synthesis: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 # ─────────────────────────────────────────
 # OPERATIONS
 # ─────────────────────────────────────────
@@ -162,7 +171,7 @@ async def get_show(session: AsyncSession, show_id: str) -> Optional[Show]:
     return result.scalar_one_or_none()
 
 
-async def list_shows(session: AsyncSession, limit: int = 20, offset: int = 0) -> list[Show]:
+async def list_shows(session: AsyncSession, limit: int = 500, offset: int = 0) -> list[Show]:
     result = await session.execute(
         select(Show).order_by(Show.created_at.desc()).limit(limit).offset(offset)
     )

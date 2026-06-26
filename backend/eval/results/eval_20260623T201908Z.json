@@ -1,0 +1,124 @@
+{
+  "run_at": "20260623T201908Z",
+  "k": 5,
+  "server": "http://localhost:8000",
+  "golden": "/Users/fengze/Desktop/fashion-archive/backend/eval/golden_queries.yaml",
+  "validated_only": true,
+  "aggregates": {
+    "all": {
+      "n": 3,
+      "mean_precision_at_k": 0.4667,
+      "mean_recall_at_k": 1.0,
+      "hit_rate_at_k": 1.0
+    },
+    "validated": {
+      "n": 3,
+      "mean_precision_at_k": 0.4667,
+      "mean_recall_at_k": 1.0,
+      "hit_rate_at_k": 1.0
+    }
+  },
+  "rows": [
+    {
+      "query": "Chanel tweed blazer",
+      "kind": "brand",
+      "validated": true,
+      "expect": [
+        "chanel__spring-1993-ready-to-wear",
+        "chanel__fall-2000-ready-to-wear",
+        "chanel__aw2016"
+      ],
+      "precision_at_k": 0.6,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 3,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "chanel__aw2019",
+        "chanel__aw2020",
+        "chanel__fall-2000-ready-to-wear",
+        "chanel__fall-2011-ready-to-wear",
+        "chanel__fall-2024-couture"
+      ],
+      "top_k_shows": [
+        "chanel__fall-2024-couture",
+        "chanel__fall-2000-ready-to-wear",
+        "chanel__aw2020",
+        "chanel__fall-2011-ready-to-wear",
+        "chanel__aw2019"
+      ],
+      "top_k_confidence": [
+        99,
+        99,
+        99,
+        98,
+        89
+      ]
+    },
+    {
+      "query": "Dior feminine tailoring",
+      "kind": "brand",
+      "validated": true,
+      "expect": [
+        "dior__fall-2024-ready-to-wear",
+        "dior__spring-2025-ready-to-wear",
+        "dior__spring-2024-ready-to-wear"
+      ],
+      "precision_at_k": 0.6,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 3,
+      "k": 5,
+      "expected_count": 3,
+      "retrieved_keys": [
+        "dior__fall-2024-ready-to-wear",
+        "dior__spring-2024-ready-to-wear",
+        "dior__spring-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "dior__fall-2024-ready-to-wear",
+        "dior__fall-2024-ready-to-wear",
+        "dior__fall-2024-ready-to-wear",
+        "dior__spring-2025-ready-to-wear",
+        "dior__spring-2024-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        74,
+        70,
+        68,
+        64,
+        62
+      ]
+    },
+    {
+      "query": "Vivienne Westwood corset",
+      "kind": "brand",
+      "validated": true,
+      "expect": [
+        "vivienne-westwood__fall-1993-ready-to-wear"
+      ],
+      "precision_at_k": 0.2,
+      "recall_at_k": 1.0,
+      "hit_at_k": 1,
+      "hits": 1,
+      "k": 5,
+      "expected_count": 1,
+      "retrieved_keys": [
+        "vivienne-westwood__fall-1993-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear"
+      ],
+      "top_k_shows": [
+        "vivienne-westwood__fall-1993-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear",
+        "vivienne-westwood__fall-2025-ready-to-wear"
+      ],
+      "top_k_confidence": [
+        84,
+        67,
+        61
+      ]
+    }
+  ],
+  "errors": []
+}

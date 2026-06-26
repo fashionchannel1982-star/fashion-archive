@@ -145,6 +145,7 @@ async def add_show(args: argparse.Namespace) -> None:
             source_name="FC Master Archive" if args.source == "fc_master" else "YouTube",
             source_type=args.source,
             source_url=args.video if args.video.startswith("http") else None,
+            submitted_by="script",
         )
         session.add(prov)
         await session.commit()
@@ -225,6 +226,7 @@ async def replace_show(existing: Show, args: argparse.Namespace) -> None:
                     source_name="FC Master Archive" if new_source == "fc_master" else "YouTube",
                     source_type=new_source,
                     source_url=args.video if args.video.startswith("http") else None,
+                    submitted_by="script",
                 ))
 
             await session.commit()

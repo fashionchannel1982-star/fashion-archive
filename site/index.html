@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fashion Archive — the intelligence layer for runway heritage</title>
+<meta name="description" content="Fashion Archive makes four decades of runway searchable, intelligently described and correctly attributed. A private beta opens in 2026 — request early access.">
+<meta property="og:title" content="Fashion Archive">
+<meta property="og:description" content="Four decades of runway, made searchable. The intelligence and attribution layer for fashion heritage.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://fashionarchive.ai">
+<meta name="theme-color" content="#0A0A0A">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,300;0,400;0,500;1,400&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0A0A0A; --bg-card:#141414; --line:#222; --line-soft:#1b1b1b;
+    --text:#F5F5F0; --muted:#8A8A85; --muted-2:#6a6a66;
+    --accent:#EDE8DC; --gold:#C2912F; --gold-soft:#caa14a;
+    --display:'Cormorant',Georgia,serif; --body:'Space Grotesk',system-ui,sans-serif;
+    --maxw:1080px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--text); font-family:var(--body);
+    font-weight:300; line-height:1.6; -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  /* subtle film grain + vignette */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0; opacity:.035;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  body::after{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:radial-gradient(120% 90% at 50% -10%, rgba(194,145,47,.10), transparent 55%);
+  }
+  .wrap{position:relative; z-index:1; max-width:var(--maxw); margin:0 auto; padding:0 28px}
+  .eyebrow{font-size:11px; letter-spacing:.32em; text-transform:uppercase; color:var(--gold); font-weight:500}
+
+  /* nav */
+  nav{display:flex; justify-content:space-between; align-items:center; padding:30px 28px; max-width:var(--maxw); margin:0 auto; position:relative; z-index:2}
+  nav .mark{font-family:var(--display); font-size:21px; letter-spacing:.04em; color:var(--text); text-decoration:none}
+  nav a.req{font-size:13px; letter-spacing:.06em; color:var(--text); text-decoration:none; border:1px solid var(--line); padding:9px 18px; border-radius:999px; transition:.25s}
+  nav a.req:hover{border-color:var(--gold); color:var(--gold-soft)}
+  nav .nav-right{display:flex; align-items:center; gap:24px}
+  nav a.partner{font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted-2); text-decoration:none; font-weight:300; transition:.2s}
+  nav a.partner:hover{color:var(--muted)}
+
+  /* hero */
+  header.hero{padding:11vh 0 9vh; position:relative; z-index:1}
+  .hero h1{font-family:var(--display); font-weight:300; font-size:clamp(40px,7.4vw,82px); line-height:1.04; letter-spacing:-.01em; max-width:14ch; margin:22px 0 0}
+  .hero h1 em{font-style:italic; color:var(--gold-soft)}
+  .hero .lede{font-size:clamp(16px,2vw,19px); color:var(--muted); max-width:54ch; margin-top:26px}
+  .shimmer{height:1px; width:min(420px,70%); margin-top:40px;
+    background:linear-gradient(90deg,transparent,var(--gold),transparent);
+    background-size:200% 100%; animation:sh 6s ease-in-out infinite; opacity:.7}
+  @keyframes sh{0%,100%{background-position:200% 0}50%{background-position:0 0}}
+  .cta-row{display:flex; gap:16px; flex-wrap:wrap; margin-top:40px}
+  .btn{font-family:var(--body); font-size:14px; letter-spacing:.04em; border-radius:999px; padding:14px 26px; cursor:pointer; text-decoration:none; display:inline-block; transition:.25s; border:1px solid transparent}
+  .btn-primary{background:var(--accent); color:#0A0A0A; font-weight:500}
+  .btn-primary:hover{background:#fff}
+  .btn-ghost{border-color:var(--line); color:var(--text)}
+  .btn-ghost:hover{border-color:var(--gold); color:var(--gold-soft)}
+
+  /* sections */
+  section{padding:7vh 0; border-top:1px solid var(--line-soft); position:relative; z-index:1}
+  .sec-eyebrow{margin-bottom:20px}
+  .prose{font-family:var(--display); font-weight:300; font-size:clamp(22px,3vw,30px); line-height:1.45; max-width:24ch; letter-spacing:.005em}
+  .prose.full{max-width:30ch}
+  .manifesto p{font-size:17px; color:var(--muted); max-width:62ch; margin-top:18px}
+  .manifesto p strong{color:var(--text); font-weight:400}
+
+  /* pillars */
+  .pillars{display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line-soft); border:1px solid var(--line-soft); border-radius:4px; overflow:hidden; margin-top:8px}
+  .pillar{background:var(--bg); padding:34px 28px}
+  .pillar .n{font-size:11px; letter-spacing:.2em; color:var(--gold); text-transform:uppercase}
+  .pillar h3{font-family:var(--display); font-weight:400; font-size:26px; margin:14px 0 10px}
+  .pillar p{font-size:14.5px; color:var(--muted); line-height:1.55}
+
+  /* audiences */
+  .aud{display:flex; flex-wrap:wrap; gap:10px 26px; margin-top:24px}
+  .aud span{font-size:14px; color:var(--muted)}
+  .aud span b{color:var(--text); font-weight:400}
+
+  /* waitlist */
+  .signup{background:var(--bg-card); border:1px solid var(--line); border-radius:8px; padding:clamp(28px,5vw,52px); max-width:760px}
+  .signup h2{font-family:var(--display); font-weight:300; font-size:clamp(28px,4vw,40px); line-height:1.1}
+  .signup .sub{color:var(--muted); margin-top:14px; max-width:52ch; font-size:15.5px}
+  form{margin-top:30px}
+  .field-label{display:block; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin:0 0 12px}
+  .roles{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:26px}
+  .role{cursor:pointer}
+  .role input{position:absolute; opacity:0; width:0; height:0}
+  .role span{display:inline-block; padding:10px 16px; border:1px solid var(--line); border-radius:999px; font-size:13.5px; color:var(--muted); transition:.2s}
+  .role:hover span{border-color:#3a3a36; color:var(--text)}
+  .role input:checked + span{border-color:var(--gold); color:#0A0A0A; background:var(--gold-soft)}
+  .role input:focus-visible + span{outline:2px solid var(--gold-soft); outline-offset:2px}
+  .email-row{display:flex; gap:12px; flex-wrap:wrap}
+  input[type=email]{flex:1; min-width:240px; background:#0e0e0e; border:1px solid var(--line); border-radius:999px; padding:15px 22px; color:var(--text); font-family:var(--body); font-size:15px}
+  input[type=email]::placeholder{color:var(--muted-2)}
+  input[type=email]:focus{outline:none; border-color:var(--gold)}
+  .opts{margin-top:22px; display:flex; flex-direction:column; gap:14px}
+  .check{display:flex; gap:12px; align-items:flex-start; font-size:13.5px; color:var(--muted); cursor:pointer}
+  .check input{margin-top:3px; accent-color:var(--gold); width:16px; height:16px; flex:0 0 auto}
+  .check a{color:var(--gold-soft)}
+  .form-msg{margin-top:18px; font-size:14px; min-height:20px}
+  .form-msg.ok{color:var(--gold-soft)}
+  .form-msg.err{color:#d98b8b}
+  .success{display:none; padding:8px 0}
+  .success h3{font-family:var(--display); font-weight:400; font-size:28px; color:var(--text)}
+  .success p{color:var(--muted); margin-top:10px; font-size:15px}
+
+  /* contact / footer */
+  .contact{display:flex; flex-wrap:wrap; gap:30px 64px; align-items:flex-start}
+  .contact .col h4{font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); margin-bottom:10px}
+  .contact .col a{color:var(--text); text-decoration:none; font-size:16px; border-bottom:1px solid var(--line); padding-bottom:2px; transition:.2s}
+  .contact .col a:hover{color:var(--gold-soft); border-color:var(--gold)}
+  .contact .col p{color:var(--muted); font-size:14px; max-width:34ch}
+  footer{border-top:1px solid var(--line-soft); padding:40px 0 60px; position:relative; z-index:1}
+  footer .row{display:flex; justify-content:space-between; flex-wrap:wrap; gap:14px; color:var(--muted-2); font-size:13px}
+  footer .row a{color:var(--muted); text-decoration:none}
+
+  @media(max-width:720px){
+    .pillars{grid-template-columns:1fr}
+    nav a.req, nav a.partner{display:none}
+    header.hero{padding:7vh 0 6vh}
+  }
+  @media(prefers-reduced-motion:reduce){.shimmer{animation:none}}
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="mark" href="#top">Fashion&nbsp;Archive</a>
+  <div class="nav-right">
+    <a class="partner" href="https://app.fashionarchive.ai">Partner Login</a>
+    <a class="req" href="#access">Request access</a>
+  </div>
+</nav>
+
+<div class="wrap" id="top">
+
+  <header class="hero">
+    <div class="eyebrow">Fashion Archive</div>
+    <h1>Four decades of runway, made <em>searchable</em>.</h1>
+    <p class="lede">We're building the intelligence and attribution layer for the world's runway heritage — every show, described, connected and correctly credited. A private beta opens in 2026.</p>
+    <div class="shimmer" aria-hidden="true"></div>
+    <div class="cta-row">
+      <a href="#access" class="btn btn-primary">Request early access</a>
+      <a href="#idea" class="btn btn-ghost">What we're building</a>
+    </div>
+  </header>
+
+</div>
+
+<section id="idea">
+  <div class="wrap manifesto">
+    <div class="eyebrow sec-eyebrow">The idea</div>
+    <p class="prose full">Fashion's memory is locked in time. The shows happened. The footage exists. But almost none of it is findable, connectable, or properly credited.</p>
+    <p>Fashion Archive lets you <strong>search decades of runway in plain language</strong> — "sheer black tailoring", "structured shoulders" — and find the exact moving moment. Follow a house's signature codes as they shift across the years. And see every moment carried with <strong>its source, its season and its maker</strong>.</p>
+    <p>It's built for the people who make, study and steward fashion: designers and houses, students and schools, researchers, buyers and the press. Not another image library — a living, intelligent, credited record of how fashion actually evolved.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow sec-eyebrow">What it is</div>
+    <div class="pillars">
+      <div class="pillar">
+        <div class="n">01 — Archive</div>
+        <h3>The footage, finally findable</h3>
+        <p>Runway video spanning 40+ years, indexed moment by moment — the heritage that exists nowhere else in searchable form.</p>
+      </div>
+      <div class="pillar">
+        <div class="n">02 — Intelligence</div>
+        <h3>Search that understands fashion</h3>
+        <p>Ask in plain language and get the precise moment, with an AI reading of the garment, the silhouette and the lineage behind it.</p>
+      </div>
+      <div class="pillar">
+        <div class="n">03 — Attribution</div>
+        <h3>Every moment, credited</h3>
+        <p>Source, season and maker travel with every clip — a trustworthy record of who created what, and when.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="access">
+  <div class="wrap">
+    <div class="signup">
+      <div id="form-live">
+        <div class="eyebrow" style="margin-bottom:18px">Private beta · 2026</div>
+        <h2>Request early access</h2>
+        <p class="sub">We're opening access by invitation, in small cohorts. Tell us who you are and we'll be in touch as places open.</p>
+
+        <form id="waitlist" novalidate>
+          <span class="field-label" id="role-label">I am a…</span>
+          <div class="roles" role="group" aria-labelledby="role-label">
+            <label class="role"><input type="radio" name="role" value="student" required><span>Student</span></label>
+            <label class="role"><input type="radio" name="role" value="professional"><span>Professional</span></label>
+            <label class="role"><input type="radio" name="role" value="institution"><span>School / University</span></label>
+            <label class="role"><input type="radio" name="role" value="press"><span>Press</span></label>
+            <label class="role"><input type="radio" name="role" value="archive"><span>Archive holder</span></label>
+          </div>
+
+          <label class="field-label" for="email">Email</label>
+          <div class="email-row">
+            <input type="email" id="email" name="email" placeholder="you@studio.com" required autocomplete="email">
+            <button type="submit" class="btn btn-primary">Request access</button>
+          </div>
+
+          <div class="opts">
+            <label class="check">
+              <input type="checkbox" name="brief" value="yes">
+              <span>Also send me the <strong style="color:var(--text);font-weight:400">Archive Intelligence Brief</strong> — an occasional dispatch on what the runway reveals.</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" name="consent" value="yes" required>
+              <span>I agree to be contacted about Fashion Archive and to the handling of my email per the <a href="#privacy">privacy note</a>. You can unsubscribe anytime.</span>
+            </label>
+          </div>
+
+          <div class="form-msg" id="msg" role="status" aria-live="polite"></div>
+        </form>
+      </div>
+
+      <div class="success" id="form-done">
+        <h3>You're on the list.</h3>
+        <p>Thank you — we'll be in touch as cohorts open. In the meantime, the work continues quietly.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap contact">
+    <div class="col">
+      <h4>Institutions &amp; partners</h4>
+      <a href="mailto:hello@fashionarchive.ai">hello@fashionarchive.ai</a>
+      <p style="margin-top:12px">Universities, archives and rights holders — we'd love to talk about founding partnerships.</p>
+    </div>
+    <div class="col">
+      <h4>Press</h4>
+      <a href="mailto:press@fashionarchive.ai">press@fashionarchive.ai</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="row">
+      <span>Fashion Archive — the intelligence layer for runway heritage</span>
+      <span id="privacy">fashionarchive.ai · © <span id="yr"></span></span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('yr').textContent = new Date().getFullYear();
+
+  // ── Connect the waitlist (Formspree) ────────────────────────────────────
+  // GO LIVE IN 2 MINUTES:
+  //   1. Create a free account at https://formspree.io and add a new form.
+  //   2. It gives you an endpoint like https://formspree.io/f/abcdwxyz
+  //   3. Replace YOUR_FORM_ID below with that id (keep the quotes). Done.
+  // Until you do, the form runs in demo mode (logs to console, shows success).
+  const FORM_ENDPOINT = "https://formspree.io/f/YOUR_FORM_ID";
+
+  const form = document.getElementById('waitlist');
+  const msg  = document.getElementById('msg');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    msg.className = 'form-msg';
+    msg.textContent = '';
+
+    const email   = form.email.value.trim();
+    const role    = form.querySelector('input[name=role]:checked');
+    const consent = form.consent.checked;
+
+    if (!role)                         return fail('Please tell us who you are.');
+    if (!/^\S+@\S+\.\S+$/.test(email)) return fail('Please enter a valid email.');
+    if (!consent)                      return fail('Please tick the consent box so we can contact you.');
+
+    const payload = {
+      email,
+      role: role.value,
+      brief: form.brief.checked ? 'yes' : 'no',
+      source: 'fashionarchive.ai',
+      _subject: 'New Fashion Archive waitlist signup'
+    };
+
+    // demo mode until a real Formspree id is set
+    if (!FORM_ENDPOINT || FORM_ENDPOINT.includes('YOUR_FORM_ID')) {
+      console.log('Waitlist signup (demo — set your Formspree id to send):', payload);
+      return done();
+    }
+
+    try {
+      const res = await fetch(FORM_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('bad status');
+      done();
+    } catch (err) {
+      fail('Something went wrong — please try again, or email hello@fashionarchive.ai.');
+    }
+  });
+
+  function fail(t){ msg.className = 'form-msg err'; msg.textContent = t; }
+  function done(){
+    document.getElementById('form-live').style.display = 'none';
+    const d = document.getElementById('form-done');
+    d.style.display = 'block';
+    d.scrollIntoView({ behavior:'smooth', block:'center' });
+  }
+</script>
+</body>
+</html>

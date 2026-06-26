@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@swc/helpers": "^0.5.23",
     "hls.js": "^1.6.16",
     "next": "^16.2.9",
     "react": "^18",

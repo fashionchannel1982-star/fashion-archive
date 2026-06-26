@@ -20,15 +20,15 @@ const CURATED_QUERIES = [
   // concept
   "sheer black evening looks",
   "structured shoulders, sharp tailoring",
-  "monochrome white, head to toe",
+  "minimal all-black, head to toe",
   "maximalist print colour runway",
   // brand
   "Chanel tweed and tailoring",
   "Dior structured tailoring",
   // motion
   "a model pausing at the end of the runway",
-  // year / archive
-  "Chanel 1993",
+  // archive
+  "archive runway drama",
   // colour / statement
   "red dress",
 ];
@@ -267,12 +267,12 @@ function HeroMoment({
       style={{
         position: "relative",
         width: "100%",
-        maxWidth: 960,
-        margin: "0 auto 40px",
-        borderRadius: 10,
+        margin: 0,
+        borderRadius: 8,
         overflow: "hidden",
         cursor: "pointer",
-        aspectRatio: "16/9",
+        height: "72vh",
+        border: "1px solid rgba(255,255,255,0.07)",
         background: "#0D0D0D",
         border: "1px solid rgba(255,255,255,0.07)",
       }}
@@ -332,28 +332,31 @@ function HeroMoment({
       {/* Provenance overlay */}
       <div style={{
         position: "absolute", bottom: 0, left: 0, right: 0,
-        padding: "24px 28px 22px",
+        padding: "32px 28px 22px",
+        textAlign: "left",
       }}>
         <div style={{
-          fontFamily: "var(--font-display)",
-          fontSize: 22, fontWeight: 300,
-          color: "#F5F5F0", letterSpacing: "0.1em",
-          marginBottom: 6,
-          textShadow: "0 1px 8px rgba(0,0,0,0.6)",
+          fontFamily: "var(--font-body)",
+          fontSize: 10, fontWeight: 400,
+          color: "rgba(200,169,122,0.9)", letterSpacing: "0.18em",
+          textTransform: "uppercase", marginBottom: 6,
+          textShadow: "0 1px 6px rgba(0,0,0,0.8)",
         }}>
-          {result.brand.toUpperCase()} · {result.season}
+          {result.brand} · {result.season}
         </div>
         <div style={{
-          fontFamily: "var(--font-body)", fontSize: 12, color: "rgba(245,245,240,0.75)",
-          lineHeight: 1.5, maxWidth: 600,
-          textShadow: "0 1px 6px rgba(0,0,0,0.6)",
+          fontFamily: "var(--font-display)",
+          fontSize: 17, fontWeight: 300,
+          color: "#F5F5F0", letterSpacing: "0.01em",
+          lineHeight: 1.4, maxWidth: 560,
+          textShadow: "0 1px 10px rgba(0,0,0,0.7)",
         }}>
           {result.description}
         </div>
         <div style={{
-          marginTop: 8,
-          fontFamily: "var(--font-body)", fontSize: 10, color: "rgba(200,200,195,0.6)",
-          letterSpacing: "0.08em",
+          marginTop: 10,
+          fontFamily: "var(--font-body)", fontSize: 10, color: "rgba(200,200,195,0.45)",
+          letterSpacing: "0.1em", textTransform: "uppercase",
         }}>
           Click to play
         </div>
@@ -438,10 +441,16 @@ function ResultCard({
         ) : (
           <div style={{
             width: "100%", height: "100%",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#2A2A2A", fontFamily: "var(--font-display)", fontSize: 13, letterSpacing: "0.2em",
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", gap: 8,
           }}>
-            {result.brand.toUpperCase()}
+            <span style={{ fontSize: 20, color: "#2E2E2C", lineHeight: 1 }}>◻</span>
+            <span style={{
+              fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: "0.2em",
+              color: "#4A4A48",
+            }}>
+              {result.brand.toUpperCase()}
+            </span>
           </div>
         )}
         {/* Timestamp pill */}
@@ -725,10 +734,10 @@ function VideoModal({
           {error ? (
             <div style={{
               position: "absolute", inset: 0, display: "flex", flexDirection: "column",
-              alignItems: "center", justifyContent: "center", gap: 8,
+              alignItems: "center", justifyContent: "center", gap: 10,
             }}>
-              <span style={{ fontFamily: "var(--font-display)", fontSize: 16, letterSpacing: "0.1em", color: "#3A3A3A" }}>Clip unavailable</span>
-              <span style={{ fontFamily: "var(--font-body)", fontSize: 11, color: "#2A2A2A", letterSpacing: "0.04em" }}>The stream could not be loaded</span>
+              <span style={{ fontFamily: "var(--font-display)", fontSize: 16, letterSpacing: "0.1em", color: "#8A8A85" }}>Clip unavailable</span>
+              <span style={{ fontFamily: "var(--font-body)", fontSize: 11, color: "#5A5A56", letterSpacing: "0.04em" }}>The stream could not be loaded — close and try again</span>
             </div>
           ) : (
             <video ref={videoRef} controls style={{ width: "100%", height: "100%", display: "block" }} />
@@ -1249,10 +1258,10 @@ export default function Home() {
         borderBottom: "1px solid rgba(255,255,255,0.05)",
         background: "rgba(10,10,10,0.92)", backdropFilter: "blur(12px)",
         zIndex: 50, display: "flex", alignItems: "center",
-        padding: "0 32px", justifyContent: "space-between",
+        padding: "0 70px", justifyContent: "space-between",
       }}>
         <span style={{
-          fontFamily: "var(--font-display)", fontSize: 15,
+          fontFamily: "var(--font-display)", fontSize: 19,
           letterSpacing: "0.16em", color: "#EDE8DC",
         }}>
           FASHION ARCHIVE
@@ -1300,14 +1309,14 @@ export default function Home() {
         <div style={{
           display: "flex", flexDirection: "column",
           alignItems: "center",
-          justifyContent: hasSearched ? "flex-start" : "center",
+          justifyContent: "flex-start",
           minHeight: hasSearched ? "auto" : "calc(100vh - 56px)",
           padding: hasSearched ? "0 32px 24px" : "0 32px 56px",
           transition: "all 0.4s ease",
         }}>
-          {/* Empty state — wordmark + hero + chips */}
+          {/* Landing hero — inset from edges, dropped from header */}
           {!hasSearched && heroResult && (
-            <div style={{ width: "100%", maxWidth: 960, textAlign: "center", marginBottom: 36 }}>
+            <div style={{ width: "100%", marginTop: 57, flexShrink: 0 }}>
               <HeroMoment
                 result={heroResult}
                 onPlay={(r) => setPlayingMoment({ id: r.moment_id, brand: r.brand, season: r.season })}
@@ -1317,7 +1326,7 @@ export default function Home() {
 
           {/* Search input + autocomplete */}
           <div
-            style={{ width: "100%", maxWidth: 640, position: "relative" }}
+            style={{ width: "100%", maxWidth: 640, position: "relative", marginTop: (!hasSearched && heroResult) ? 28 : 0 }}
             onBlur={(e) => {
               // hide dropdown when focus leaves the container entirely
               if (!e.currentTarget.contains(e.relatedTarget as Node)) {

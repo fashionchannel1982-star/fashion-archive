@@ -462,10 +462,13 @@ _ACCESSORY_INC = 0.06
 _BOOST_CAP = 0.20
 
 
-def _any_match(needles: list[str], haystack: str) -> bool:
-    """True if any needle appears as a case-insensitive substring of haystack."""
+def _any_match(needles: list, haystack: str) -> bool:
+    """True if any needle matches as a whole word (case-insensitive) in haystack."""
     h = haystack.lower()
-    return any(n in h for n in needles)
+    for n in needles:
+        if re.search(r'\b' + re.escape(n.lower()) + r'\b', h):
+            return True
+    return False
 
 
 def attribute_boost(enriched: dict, attrs: dict) -> float:
@@ -474,36 +477,60 @@ def attribute_boost(enriched: dict, attrs: dict) -> float:
     structured fields match the parsed query attributes.
     enriched keys: colours (list), garments (list), silhouette (str),
                    key_pieces (list), search_tags (list).
+
+    Multi-attribute rule: when the query specifies BOTH colour and garment,
+    the full increment is awarded only when BOTH match (combination hit).
+    A partial hit (one attribute only) earns half the increment so that
+    "red dress" ranks a true red dress above a red coat or a black dress.
+    Single-attribute queries are unchanged — they use the full increment.
     """
     if not attrs or not enriched:
         return 0.0
 
-    colours_q = attrs.get("colours") or []
-    garments_q = attrs.get("garments") or []
+    colours_q    = attrs.get("colours") or []
+    garments_q   = attrs.get("garments") or []
     silhouettes_q = attrs.get("silhouettes") or []
+    multi_attr   = bool(colours_q) and bool(garments_q)
 
     boost = 0.0
 
-    # Colour match — check enriched.colours list and search_tags
+    # Colour match — enriched.colours + search_tags
+    colour_hit = False
     if colours_q:
         colour_blob = " ".join(
             (enriched.get("colours") or [])
             + (enriched.get("search_tags") or [])
         )
-        if colour_blob and _any_match(colours_q, colour_blob):
-            boost += _COLOUR_INC
+        colour_hit = bool(colour_blob) and _any_match(colours_q, colour_blob)
 
-    # Garment match — check enriched.garments, key_pieces, search_tags
+    # Garment match — enriched.garments + key_pieces + search_tags
+    garment_hit = False
     if garments_q:
         garment_blob = " ".join(
             (enriched.get("garments") or [])
             + (enriched.get("key_pieces") or [])
             + (enriched.get("search_tags") or [])
         )
-        if garment_blob and _any_match(garments_q, garment_blob):
+        garment_hit = bool(garment_blob) and _any_match(garments_q, garment_blob)
+
+    if multi_attr:
+        # Combination query: full boost for combo hit; half for single hit
+        combo_hit = colour_hit and garment_hit
+        if combo_hit:
+            boost += _COLOUR_INC + _GARMENT_INC
+        else:
+            if colour_hit:
+                boost += _COLOUR_INC * 0.5
+            if garment_hit:
+                boost += _GARMENT_INC * 0.5
+    else:
+        # Single-attribute: unchanged behaviour
+        if colour_hit:
+            boost += _COLOUR_INC
+        if garment_hit:
             boost += _GARMENT_INC
 
-    # Silhouette match — enriched.silhouette (str) and search_tags
+    # Silhouette match — enriched.silhouette + search_tags
     if silhouettes_q:
         silhouette_blob = " ".join(filter(None, [
             enriched.get("silhouette") or "",
@@ -512,13 +539,13 @@ def attribute_boost(enriched: dict, attrs: dict) -> float:
         if silhouette_blob and _any_match(silhouettes_q, silhouette_blob):
             boost += _SILHOUETTE_INC
 
-    # Accessory match — check search_tags for hardware/embellishment/chain etc.
+    # Accessory match — search_tags + key_pieces
     accessories_q = attrs.get("accessories") or []
     if accessories_q:
         tag_blob = " ".join(
             (enriched.get("search_tags") or [])
             + (enriched.get("key_pieces") or [])
-        ).lower()
+        )
         if tag_blob and _any_match(accessories_q, tag_blob):
             boost += _ACCESSORY_INC
 
